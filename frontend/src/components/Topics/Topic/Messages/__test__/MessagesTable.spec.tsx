@@ -86,7 +86,7 @@ describe('MessagesTable', () => {
 
       fireEvent.keyDown(resizeHandle, { key: 'ArrowRight' });
 
-      expect(columns[4]).toHaveStyle('width: 296px');
+      expect(columns[6]).toHaveStyle('width: 296px');
       expect(
         JSON.parse(
           global.localStorage.getItem(
@@ -146,7 +146,7 @@ describe('MessagesTable', () => {
 
         act(() => callbacks.get(1)?.(0));
         expect(
-          screen.getByRole('table').querySelectorAll('col')[4]
+          screen.getByRole('table').querySelectorAll('col')[6]
         ).toHaveStyle('width: 320px');
 
         fireEvent(

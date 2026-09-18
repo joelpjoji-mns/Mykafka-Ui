@@ -98,6 +98,20 @@ describe('Message component', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the message id and total message size', () => {
+    renderComponent({
+      message: {
+        ...mockMessage,
+        keySize: 8,
+        valueSize: 24,
+        headersSize: 4,
+      },
+    });
+
+    expect(screen.getByText('6:0')).toBeInTheDocument();
+    expect(screen.getByText('36 Bytes')).toBeInTheDocument();
+  });
+
   it('marks a newly streamed message for its arrival animation', () => {
     renderComponent({ isLiveArrival: true });
 

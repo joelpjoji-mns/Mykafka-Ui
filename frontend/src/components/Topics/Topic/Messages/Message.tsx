@@ -7,6 +7,7 @@ import { JSONPath } from 'jsonpath-plus';
 import Ellipsis from 'components/common/Ellipsis/Ellipsis';
 import WarningRedIcon from 'components/common/Icons/WarningRedIcon';
 import Tooltip from 'components/common/Tooltip/Tooltip';
+import BytesFormatted from 'components/common/BytesFormatted/BytesFormatted';
 import { useTimezone } from 'lib/hooks/useTimezones';
 import ClusterContext from 'components/contexts/ClusterContext';
 
@@ -47,6 +48,7 @@ const Message: React.FC<Props> = ({
     partition,
     value,
     valueSize,
+    headersSize,
     headers,
     valueSerde,
     keySerde,
@@ -95,6 +97,18 @@ const Message: React.FC<Props> = ({
     withMilliseconds: true,
   });
   const serializedHeaders = JSON.stringify(headers || {});
+  const messageId = `${partition}:${offset}`;
+  const messageSize =
+    keySize !== undefined ||
+    valueSize !== undefined ||
+    headersSize !== undefined
+      ? (keySize || 0) + (valueSize || 0) + (headersSize || 0)
+      : undefined;
+  const messageSizeBreakdown = [
+    `Key: ${keySize ?? '-'} bytes`,
+    `Value: ${valueSize ?? '-'} bytes`,
+    `Headers: ${headersSize ?? '-'} bytes`,
+  ].join(', ');
 
   return (
     <>
@@ -110,6 +124,7 @@ const Message: React.FC<Props> = ({
             <MessageToggleIcon isOpen={isOpen} />
           </IconButtonWrapper>
         </td>
+        <td title="Partition:Offset">{messageId}</td>
         <td>{offset}</td>
         <td>{partition}</td>
         <td>
@@ -117,6 +132,13 @@ const Message: React.FC<Props> = ({
             <Tooltip value={timeAgo(timestamp)} content={messageTimestamp} />
           ) : (
             <div>{messageTimestamp}</div>
+          )}
+        </td>
+        <td title={messageSizeBreakdown}>
+          {messageSize === undefined ? (
+            '-'
+          ) : (
+            <BytesFormatted value={messageSize} />
           )}
         </td>
         <S.DataCell title={key}>

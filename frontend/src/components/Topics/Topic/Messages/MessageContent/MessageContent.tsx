@@ -93,7 +93,7 @@ const MessageContent: React.FC<MessageContentProps> = ({
 
   return (
     <S.Wrapper>
-      <td colSpan={8}>
+      <td colSpan={10}>
         <S.Section>
           <S.ContentBox>
             <S.Toolbar>

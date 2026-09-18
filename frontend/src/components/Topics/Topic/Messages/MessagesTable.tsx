@@ -24,9 +24,11 @@ type PreviewTarget = 'key' | 'headers' | 'content';
 
 type MessageColumnId =
   | 'toggle'
+  | 'id'
   | 'offset'
   | 'partition'
   | 'timestamp'
+  | 'size'
   | 'key'
   | 'headers'
   | 'value'
@@ -40,9 +42,11 @@ type StoredMessageColumnWidths = Record<string, Partial<MessageColumnWidths>>;
 
 const MESSAGE_COLUMN_IDS: MessageColumnId[] = [
   'toggle',
+  'id',
   'offset',
   'partition',
   'timestamp',
+  'size',
   'key',
   'headers',
   'value',
@@ -51,9 +55,11 @@ const MESSAGE_COLUMN_IDS: MessageColumnId[] = [
 
 const DEFAULT_COLUMN_WIDTHS: MessageColumnWidths = {
   toggle: 48,
+  id: 132,
   offset: 96,
   partition: 112,
   timestamp: 220,
+  size: 96,
   key: 280,
   headers: 260,
   value: 320,
@@ -62,9 +68,11 @@ const DEFAULT_COLUMN_WIDTHS: MessageColumnWidths = {
 
 const MINIMUM_COLUMN_WIDTHS: MessageColumnWidths = {
   toggle: 48,
+  id: 96,
   offset: 72,
   partition: 88,
   timestamp: 160,
+  size: 80,
   key: 160,
   headers: 160,
   value: 200,
@@ -322,6 +330,7 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
           <thead>
             <tr>
               <TableHeaderCell> </TableHeaderCell>
+              <TableHeaderCell title="Message ID" {...getResizeProps('id')} />
               <TableHeaderCell title="Offset" {...getResizeProps('offset')} />
               <TableHeaderCell
                 title="Partition"
@@ -331,6 +340,7 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
                 title="Timestamp"
                 {...getResizeProps('timestamp')}
               />
+              <TableHeaderCell title="Size" {...getResizeProps('size')} />
               <TableHeaderCell
                 title="Key"
                 previewText={`Preview ${
@@ -380,14 +390,14 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
             ))}
             {isFetching && !messages.length && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={10}>
                   <PageLoader />
                 </td>
               </tr>
             )}
             {messages.length === 0 && !isFetching && (
               <tr>
-                <td colSpan={8}>No messages found</td>
+                <td colSpan={10}>No messages found</td>
               </tr>
             )}
           </tbody>

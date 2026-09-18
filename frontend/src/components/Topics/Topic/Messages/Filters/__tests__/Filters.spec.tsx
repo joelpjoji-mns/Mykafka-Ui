@@ -14,6 +14,7 @@ import { PollingMode } from 'generated-sources';
 import { ModeOptions } from 'lib/hooks/filterUtils';
 import { MessagesFilterKeysTypes } from 'lib/types';
 import { MessagesFilterKeys } from 'lib/constants';
+import { useSearchParams } from 'react-router-dom';
 
 const closeIconMock = 'closeIconMock';
 const filtersSideBarMock = 'filtersSideBarMock';
@@ -48,6 +49,12 @@ jest.mock(
 const clusterName = 'cluster-name';
 const topicName = 'topic-name';
 
+const SearchParamsProbe = () => {
+  const [searchParams] = useSearchParams();
+
+  return <output data-testid="search-params">{searchParams.toString()}</output>;
+};
+
 interface StatefulFiltersProps {
   initialStringFilters: string[];
 }
@@ -57,9 +64,6 @@ const StatefulFilters: React.FC<StatefulFiltersProps> = ({
 }) => {
   const [stringFilters, setStringFilters] =
     React.useState<string[]>(initialStringFilters);
-  const resetStringFilters = React.useCallback(() => {
-    setStringFilters([]);
-  }, []);
 
   return (
     <Filters
@@ -77,7 +81,6 @@ const StatefulFilters: React.FC<StatefulFiltersProps> = ({
           return nextStringFilters;
         });
       }}
-      resetStringFilters={resetStringFilters}
     />
   );
 };
@@ -95,7 +98,6 @@ const renderComponent = (
         abortFetchData={jest.fn()}
         stringFilters={[]}
         setStringFilter={jest.fn()}
-        resetStringFilters={jest.fn()}
         {...props}
       />
     </WithRoute>,
@@ -225,6 +227,81 @@ describe('Filters component', () => {
         expect(
           screen.queryByPlaceholderText('Refine search')
         ).not.toBeInTheDocument();
+      });
+    });
+
+    it('preserves refinements and resets the cursor when primary search changes', async () => {
+      render(
+        <WithRoute path={clusterTopicPath()}>
+          <Filters
+            isFetching={false}
+            abortFetchData={jest.fn()}
+            stringFilters={[]}
+            setStringFilter={jest.fn()}
+          />
+          <SearchParamsProbe />
+        </WithRoute>,
+        {
+          initialEntries: [
+            `${clusterTopicPath(
+              clusterName,
+              topicName
+            )}?stringFilter=first&stringFilter=second&cursor=3`,
+          ],
+        }
+      );
+
+      fireEvent.change(screen.getByPlaceholderText('Search'), {
+        target: { value: 'updated' },
+      });
+
+      await waitFor(() => {
+        const searchParams = new URLSearchParams(
+          screen.getByTestId('search-params').textContent || ''
+        );
+
+        expect(searchParams.getAll(MessagesFilterKeys.stringFilter)).toEqual([
+          'updated',
+          'second',
+        ]);
+        expect(searchParams.has(MessagesFilterKeys.cursor)).toBe(false);
+      });
+    });
+
+    it('clears primary and refinement search filters together', async () => {
+      render(
+        <WithRoute path={clusterTopicPath()}>
+          <Filters
+            isFetching={false}
+            abortFetchData={jest.fn()}
+            stringFilters={[]}
+            setStringFilter={jest.fn()}
+          />
+          <SearchParamsProbe />
+        </WithRoute>,
+        {
+          initialEntries: [
+            `${clusterTopicPath(
+              clusterName,
+              topicName
+            )}?stringFilter=first&stringFilter=second&cursor=3`,
+          ],
+        }
+      );
+
+      fireEvent.change(screen.getByPlaceholderText('Search'), {
+        target: { value: '' },
+      });
+
+      await waitFor(() => {
+        const searchParams = new URLSearchParams(
+          screen.getByTestId('search-params').textContent || ''
+        );
+
+        expect(searchParams.getAll(MessagesFilterKeys.stringFilter)).toEqual(
+          []
+        );
+        expect(searchParams.has(MessagesFilterKeys.cursor)).toBe(false);
       });
     });
   });

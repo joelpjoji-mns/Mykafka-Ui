@@ -152,6 +152,7 @@ export function useMessagesFilters(topicName: string) {
       removeMessagesFiltersField(MessagesFilterKeys.timestamp);
       removeMessagesFiltersField(MessagesFilterKeys.timestampTo);
       setMessagesFiltersField(MessagesFilterKeys.mode, newMode);
+      params.delete(MessagesFilterKeys.cursor);
       params.set(MessagesFilterKeys.mode, newMode);
       params.delete(MessagesFilterKeys.offset);
       params.delete(MessagesFilterKeys.timestamp);
@@ -164,6 +165,7 @@ export function useMessagesFilters(topicName: string) {
     if (newDate === null) {
       setSearchParams((params) => {
         removeMessagesFiltersField(MessagesFilterKeys.timestamp);
+        params.delete(MessagesFilterKeys.cursor);
         params.delete(MessagesFilterKeys.timestamp);
         return params;
       });
@@ -171,6 +173,7 @@ export function useMessagesFilters(topicName: string) {
     }
 
     setSearchParams((params) => {
+      params.delete(MessagesFilterKeys.cursor);
       setMessagesFiltersField(
         MessagesFilterKeys.timestamp,
         newDate.getTime().toString()
@@ -190,6 +193,7 @@ export function useMessagesFilters(topicName: string) {
    */
   const setTimeRange = (start: Date | null, end: Date | null) => {
     setSearchParams((params) => {
+      params.delete(MessagesFilterKeys.cursor);
       removeMessagesFiltersField(MessagesFilterKeys.offset);
       params.delete(MessagesFilterKeys.offset);
       params.delete(MessagesFilterKeys.timestamp);
@@ -259,6 +263,7 @@ export function useMessagesFilters(topicName: string) {
 
   const setKeySerde = (newKeySerde: string) => {
     setSearchParams((params) => {
+      params.delete(MessagesFilterKeys.cursor);
       params.set(MessagesFilterKeys.keySerde, newKeySerde);
       setMessagesFiltersField(MessagesFilterKeys.keySerde, newKeySerde);
       return params;
@@ -267,6 +272,7 @@ export function useMessagesFilters(topicName: string) {
 
   const setValueSerde = (newValueSerde: string) => {
     setSearchParams((params) => {
+      params.delete(MessagesFilterKeys.cursor);
       setMessagesFiltersField(MessagesFilterKeys.valueSerde, newValueSerde);
       params.set(MessagesFilterKeys.valueSerde, newValueSerde);
       return params;
@@ -275,6 +281,7 @@ export function useMessagesFilters(topicName: string) {
 
   const setOffsetValue = (newOffsetValue: string) => {
     setSearchParams((params) => {
+      params.delete(MessagesFilterKeys.cursor);
       setMessagesFiltersField(MessagesFilterKeys.offset, newOffsetValue);
       params.set(MessagesFilterKeys.offset, newOffsetValue);
       return params;
@@ -291,9 +298,20 @@ export function useMessagesFilters(topicName: string) {
 
   const setSearch = (value: string) => {
     setSearchParams((params) => {
+      const refinementFilters = params
+        .getAll(MessagesFilterKeys.stringFilter)
+        .slice(1)
+        .filter(Boolean);
+
+      params.delete(MessagesFilterKeys.cursor);
+
       if (value) {
         setMessagesFiltersField(MessagesFilterKeys.stringFilter, value);
-        params.set(MessagesFilterKeys.stringFilter, value);
+        params.delete(MessagesFilterKeys.stringFilter);
+        params.append(MessagesFilterKeys.stringFilter, value);
+        refinementFilters.forEach((refinementFilter) => {
+          params.append(MessagesFilterKeys.stringFilter, refinementFilter);
+        });
       } else {
         removeMessagesFiltersField(MessagesFilterKeys.stringFilter);
         params.delete(MessagesFilterKeys.stringFilter);
@@ -304,6 +322,7 @@ export function useMessagesFilters(topicName: string) {
 
   const setPartition = (values: Option[]) => {
     setSearchParams((params) => {
+      params.delete(MessagesFilterKeys.cursor);
       params.delete(MessagesFilterKeys.partitions);
 
       if (values.length) {
@@ -326,6 +345,7 @@ export function useMessagesFilters(topicName: string) {
   const setSmartFilter = (newFilter: AdvancedFilter | null) => {
     if (newFilter === null) {
       setSearchParams((params) => {
+        params.delete(MessagesFilterKeys.cursor);
         params.delete(MessagesFilterKeys.smartFilterId);
         params.delete(MessagesFilterKeys.activeFilterId);
         return params;
@@ -354,6 +374,7 @@ export function useMessagesFilters(topicName: string) {
     );
 
     setSearchParams((params) => {
+      params.delete(MessagesFilterKeys.cursor);
       params.set(MessagesFilterKeys.smartFilterId, filter.filterCode); // hash code, i.e. 3de77452
       params.set(MessagesFilterKeys.activeFilterId, id); // sllug name, i.e. MyFancyFilter
       return params;
@@ -395,10 +416,9 @@ export function useIsMessagesSmartFilterPersisted(
 
 export function useIsLiveMode(initSearchParams?: URLSearchParams) {
   const [searchParams] = useSearchParams(initSearchParams);
+  const mode =
+    convertStrToPollingMode(searchParams.get(MessagesFilterKeys.mode) || '') ||
+    PollingMode.TAILING;
 
-  return (
-    (convertStrToPollingMode(
-      searchParams.get(MessagesFilterKeys.mode) || ''
-    ) || PollingMode.TAILING) === PollingMode.TAILING
-  );
+  return mode === PollingMode.TAILING;
 }

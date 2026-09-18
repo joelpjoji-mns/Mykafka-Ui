@@ -31,12 +31,6 @@ const Search: React.FC<SearchProps> = ({
   const ref = useRef<ComponentRef<'input'>>(null);
   const [showIcon, setShowIcon] = useState(!!value || !!searchParams.get('q'));
 
-  useEffect(() => {
-    if (ref.current !== null && value) {
-      ref.current.value = value;
-    }
-  }, [value]);
-
   const handleChange = useDebouncedCallback((e) => {
     setShowIcon(!!e.target.value);
     if (ref.current != null) {
@@ -53,7 +47,22 @@ const Search: React.FC<SearchProps> = ({
     }
   }, 500);
 
+  useEffect(() => {
+    if (value === undefined) return;
+
+    setShowIcon(!!value);
+    if (ref.current != null) {
+      ref.current.value = value;
+    }
+  }, [value]);
+
+  useEffect(() => {
+    return () => handleChange.cancel?.();
+  }, [handleChange]);
+
   const clearSearchValue = () => {
+    handleChange.cancel?.();
+
     if (onChange) {
       onChange('');
     } else if (searchParams.get('q')) {
@@ -63,9 +72,6 @@ const Search: React.FC<SearchProps> = ({
 
     if (ref.current != null) {
       ref.current.value = '';
-    }
-    if (onChange) {
-      onChange('');
     }
     setShowIcon(false);
   };

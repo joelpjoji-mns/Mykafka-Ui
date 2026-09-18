@@ -7,7 +7,7 @@ import {
   PollingMode,
   TopicMessageConsuming,
 } from 'generated-sources';
-import React, { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import React, { ChangeEvent, useMemo, useState } from 'react';
 import MultiSelect from 'components/common/MultiSelect/MultiSelect.styled';
 import Select, { SelectOption } from 'components/common/Select/Select';
 import { Button } from 'components/common/Button/Button';
@@ -46,7 +46,6 @@ export interface FiltersProps {
   abortFetchData: () => void;
   stringFilters: string[];
   setStringFilter: (index: number, value: string) => void;
-  resetStringFilters: () => void;
 }
 
 const DEFAULT_TIME_RANGE_MS = 24 * 60 * 60 * 1000;
@@ -63,7 +62,6 @@ const Filters: React.FC<FiltersProps> = ({
   phaseMessage,
   stringFilters,
   setStringFilter,
-  resetStringFilters,
 }) => {
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
 
@@ -153,16 +151,7 @@ const Filters: React.FC<FiltersProps> = ({
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
-    if (!value) {
-      resetStringFilters();
-    }
   };
-
-  useEffect(() => {
-    if (!search) {
-      resetStringFilters();
-    }
-  }, [search, resetStringFilters]);
 
   const displayedStringFilters = search ? [...stringFilters, ''] : [];
 

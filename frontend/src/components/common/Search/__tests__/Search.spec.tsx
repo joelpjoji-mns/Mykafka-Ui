@@ -72,4 +72,30 @@ describe('Search', () => {
     clearButton = screen.queryByTestId('search-clear-button');
     expect(clearButton).not.toBeInTheDocument();
   });
+
+  it('calls the change handler once when clearing a controlled search', async () => {
+    const onChange = jest.fn();
+
+    render(
+      <Search placeholder={placeholder} value="hello" onChange={onChange} />
+    );
+
+    await userEvent.click(screen.getByTestId('search-clear-button'));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith('');
+  });
+
+  it('clears the input when its controlled value becomes empty', () => {
+    const { rerender } = render(
+      <Search placeholder={placeholder} value="hello" onChange={jest.fn()} />
+    );
+    const searchField = screen.getByPlaceholderText(placeholder);
+
+    rerender(
+      <Search placeholder={placeholder} value="" onChange={jest.fn()} />
+    );
+
+    expect(searchField).toHaveValue('');
+  });
 });

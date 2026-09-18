@@ -31,6 +31,7 @@ const Messages: React.FC = () => {
           return params;
         }
 
+        params.delete(MessagesFilterKeys.cursor);
         const nextStringFilters = value
           ? filters.slice(1)
           : filters.slice(1, index + 1);
@@ -49,19 +50,6 @@ const Messages: React.FC = () => {
     },
     [setSearchParams]
   );
-
-  const resetStringFilters = React.useCallback(() => {
-    setSearchParams((params) => {
-      const primaryFilter = params.getAll(MessagesFilterKeys.stringFilter)[0];
-
-      params.delete(MessagesFilterKeys.stringFilter);
-      if (primaryFilter) {
-        params.append(MessagesFilterKeys.stringFilter, primaryFilter);
-      }
-
-      return params;
-    });
-  }, [setSearchParams]);
 
   const {
     messages,
@@ -85,7 +73,6 @@ const Messages: React.FC = () => {
         abortFetchData={abortFetchData}
         stringFilters={stringFilters}
         setStringFilter={setStringFilter}
-        resetStringFilters={resetStringFilters}
       />
       <MessagesTable
         messages={messages}

@@ -4,7 +4,9 @@ import { NavLink } from 'react-router-dom';
 export const Breadcrumbs = styled.div`
   display: flex;
   align-items: baseline;
+  justify-content: flex-start;
   min-width: 0;
+  text-align: left;
 
   & h1 {
     min-width: 0;

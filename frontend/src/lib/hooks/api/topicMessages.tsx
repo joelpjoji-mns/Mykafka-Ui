@@ -187,6 +187,10 @@ export const useTopicMessages = ({
     abortController.current?.abort();
     abortController.current = controller;
 
+    setMessages([]);
+    setPhase(undefined);
+    setConsumptionStats(undefined);
+
     const isCurrentRequest = () =>
       abortController.current === controller && !controller.signal.aborted;
 

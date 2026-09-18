@@ -128,16 +128,50 @@ describe('Topic Messages hooks', () => {
     await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
     const firstStreamOptions = (fetchEventSource as jest.Mock).mock.calls[0][1];
 
+    await act(async () => {
+      await firstStreamOptions.onopen({ ok: true, status: 200 });
+      firstStreamOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 1, value: 'stale-message' },
+        }),
+      });
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages[0]?.value).toBe('stale-message')
+    );
+
     rerender({ stringFilters: ['second'] });
 
     await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(2));
     const secondStreamOptions = (fetchEventSource as jest.Mock).mock
       .calls[1][1];
     expect(firstStreamOptions.signal.aborted).toBe(true);
+    expect(result.current.messages).toEqual([]);
 
     await act(async () => {
       firstStreamOptions.onclose();
+      firstStreamOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 2, value: 'late-stale-message' },
+        }),
+      });
+      await secondStreamOptions.onopen({ ok: true, status: 200 });
+      secondStreamOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 3, value: 'current-message' },
+        }),
+      });
     });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((message) => message.value)).toEqual([
+        'current-message',
+      ])
+    );
     act(() => result.current.abortFetchData());
 
     expect(secondStreamOptions.signal.aborted).toBe(true);

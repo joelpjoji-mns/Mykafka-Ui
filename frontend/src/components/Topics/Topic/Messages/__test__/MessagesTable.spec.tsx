@@ -1,5 +1,11 @@
 import React from 'react';
-import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from 'lib/testHelpers';
 import MessagesTable, {
@@ -247,13 +253,35 @@ describe('MessagesTable', () => {
         )
       ).toEqual(
         JSON.stringify({
-          testTopic: {
+          'testCluster:testTopic': {
             keyFilters: [{ field: 'test1', path: 'test2' }],
             headersFilters: [{ field: 'header1', path: 'header2' }],
             contentFilters: [{ field: 'test3', path: 'test4' }],
           },
         })
       );
+    });
+
+    it('does not reuse topic-only preview filters from another namespace', async () => {
+      cleanup();
+      localStorage.setItem(
+        `${LOCAL_STORAGE_KEY_PREFIX}-message-preview`,
+        JSON.stringify({
+          testTopic: {
+            keyFilters: [{ field: 'legacy', path: 'legacy' }],
+            headersFilters: [],
+            contentFilters: [],
+          },
+        })
+      );
+
+      renderComponent({ messages: mockTopicsMessages, isFetching: false });
+
+      await waitFor(() => {
+        expect(
+          screen.queryByText('Preview (1 selected)')
+        ).not.toBeInTheDocument();
+      });
     });
   });
 });

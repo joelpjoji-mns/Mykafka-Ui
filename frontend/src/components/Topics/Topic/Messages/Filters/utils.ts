@@ -1,6 +1,5 @@
 import { Partition, PollingMode, SeekType } from 'generated-sources';
 import { Option } from 'react-multi-select-component';
-import compact from 'lib/functions/compact';
 
 export const TIME_RANGE_MODE = 'TIME_RANGE' as const;
 
@@ -72,19 +71,14 @@ export const getSelectedPartitionsFromSeekToParam = (
       .split(',')
       .map((item) => Number(item.split('::')[0]));
 
-    // TODO fix this for now
-    return compact(
-      partitions.map(({ partition }) => {
-        if (selectedPartitionIds?.includes(partition)) {
-          return {
-            value: partition,
-            label: `Partition #${partition.toString()}`,
-          };
-        }
+    const selectedPartitions = new Set(selectedPartitionIds);
 
-        return undefined;
-      })
-    );
+    return partitions
+      .filter(({ partition }) => selectedPartitions.has(partition))
+      .map(({ partition }) => ({
+        value: partition,
+        label: `Partition #${partition.toString()}`,
+      }));
   }
 
   return partitions.map(({ partition }) => ({

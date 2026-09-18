@@ -105,14 +105,9 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
   const nextCursor = useMessageFiltersStore((state) => state.nextCursor);
   const isLive = useIsLiveMode();
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
+  const previewStorageKey = `${clusterName}:${topicName}`;
   const [messagesPreview, setMessagesPreview] =
-    useLocalStorage<MessagePreviewProps>('message-preview', {
-      [topicName]: {
-        keyFilters: [],
-        headersFilters: [],
-        contentFilters: [],
-      },
-    });
+    useLocalStorage<MessagePreviewProps>('message-preview', {});
   const [storedColumnWidths, setStoredColumnWidths] =
     useLocalStorage<StoredMessageColumnWidths>('message-table-widths', {});
   const [draggedColumnWidths, setDraggedColumnWidths] = useState<
@@ -142,10 +137,10 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
   );
 
   useEffect(() => {
-    setKeyFilters(messagesPreview[topicName]?.keyFilters || []);
-    setHeadersFilters(messagesPreview[topicName]?.headersFilters || []);
-    setContentFilters(messagesPreview[topicName]?.contentFilters || []);
-  }, []);
+    setKeyFilters(messagesPreview[previewStorageKey]?.keyFilters || []);
+    setHeadersFilters(messagesPreview[previewStorageKey]?.headersFilters || []);
+    setContentFilters(messagesPreview[previewStorageKey]?.contentFilters || []);
+  }, [messagesPreview, previewStorageKey]);
 
   const getPreviewFilters = () => {
     if (previewFor === 'key') return keyFilters;
@@ -155,42 +150,60 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
 
   const setFilters = useCallback(
     (payload: PreviewFilter[]) => {
-      const currentPreview = messagesPreview[topicName] || {
-        keyFilters: [],
-        headersFilters: [],
-        contentFilters: [],
-      };
-
       if (previewFor === 'key') {
         setKeyFilters(payload);
-        setMessagesPreview({
-          ...messagesPreview,
-          [topicName]: {
-            ...currentPreview,
-            keyFilters: payload,
-          },
+        setMessagesPreview((currentPreviews) => {
+          const currentPreview = currentPreviews[previewStorageKey] || {
+            keyFilters: [],
+            headersFilters: [],
+            contentFilters: [],
+          };
+
+          return {
+            ...currentPreviews,
+            [previewStorageKey]: {
+              ...currentPreview,
+              keyFilters: payload,
+            },
+          };
         });
       } else if (previewFor === 'headers') {
         setHeadersFilters(payload);
-        setMessagesPreview({
-          ...messagesPreview,
-          [topicName]: {
-            ...currentPreview,
-            headersFilters: payload,
-          },
+        setMessagesPreview((currentPreviews) => {
+          const currentPreview = currentPreviews[previewStorageKey] || {
+            keyFilters: [],
+            headersFilters: [],
+            contentFilters: [],
+          };
+
+          return {
+            ...currentPreviews,
+            [previewStorageKey]: {
+              ...currentPreview,
+              headersFilters: payload,
+            },
+          };
         });
       } else {
         setContentFilters(payload);
-        setMessagesPreview({
-          ...messagesPreview,
-          [topicName]: {
-            ...currentPreview,
-            contentFilters: payload,
-          },
+        setMessagesPreview((currentPreviews) => {
+          const currentPreview = currentPreviews[previewStorageKey] || {
+            keyFilters: [],
+            headersFilters: [],
+            contentFilters: [],
+          };
+
+          return {
+            ...currentPreviews,
+            [previewStorageKey]: {
+              ...currentPreview,
+              contentFilters: payload,
+            },
+          };
         });
       }
     },
-    [previewFor, messagesPreview, topicName]
+    [previewFor, previewStorageKey]
   );
 
   const persistColumnWidth = (

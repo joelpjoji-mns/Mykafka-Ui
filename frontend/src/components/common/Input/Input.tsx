@@ -9,7 +9,7 @@ import { InputLabel } from './InputLabel.styled';
 export interface InputProps
   extends
     React.InputHTMLAttributes<HTMLInputElement>,
-    Omit<S.InputProps, 'search'> {
+    Omit<S.InputProps, '$search'> {
   name?: string;
   hookFormOptions?: RegisterOptions;
   search?: boolean;
@@ -182,7 +182,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>((props, ref) => {
         <S.Input
           id={fieldId}
           inputSize={inputSize}
-          search={!!search}
+          $search={!!search}
           type={type}
           onKeyPress={keyPressEventHandler}
           onPaste={pasteEventHandler}

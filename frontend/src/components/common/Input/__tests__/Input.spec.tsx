@@ -32,6 +32,12 @@ describe('Custom Input', () => {
       render(setupWrapper());
       expect(getInput()).toBeInTheDocument();
     });
+
+    it('does not forward the search styling prop to the DOM', () => {
+      render(setupWrapper({ search: true }));
+
+      expect(getInput()).not.toHaveAttribute('search');
+    });
   });
   describe('number', () => {
     const getInput = () => screen.getByRole<HTMLInputElement>('spinbutton');

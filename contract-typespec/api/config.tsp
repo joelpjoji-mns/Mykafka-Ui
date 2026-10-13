@@ -131,6 +131,7 @@ model ApplicationConfig {
         pollTimeoutMs?: int32;
         maxPageSize?: int32;
         defaultPageSize?: int32;
+        defaultDownloadLimit?: int32;
         responseTimeoutMs?: int32;
       };
       adminClientTimeout?: int32;
@@ -253,8 +254,7 @@ model ClusterConfigValidation {
 }
 
 alias ApplicationFeature =
-  "DYNAMIC_CONFIG" |
-  "COOPERATIVE_OFFSET_RESET";
+  "DYNAMIC_CONFIG";
 
 enum AuthType {
   DISABLED,

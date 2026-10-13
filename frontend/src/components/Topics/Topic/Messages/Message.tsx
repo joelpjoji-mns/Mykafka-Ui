@@ -10,6 +10,9 @@ import Tooltip from 'components/common/Tooltip/Tooltip';
 import BytesFormatted from 'components/common/BytesFormatted/BytesFormatted';
 import { useTimezone } from 'lib/hooks/useTimezones';
 import ClusterContext from 'components/contexts/ClusterContext';
+import { useSearchParams } from 'react-router-dom';
+import { MessagesFilterKeys } from 'lib/constants';
+import HighlightedText from 'components/common/HighlightedText/HighlightedText';
 
 import MessageContent from './MessageContent/MessageContent';
 import MessageActions from './MessageActions';
@@ -36,6 +39,8 @@ const Message: React.FC<Props> = ({
   isLiveArrival = false,
 }) => {
   const { currentTimezone } = useTimezone();
+  const [params] = useSearchParams();
+  const searchTerms = params.getAll(MessagesFilterKeys.stringFilter);
   const [isOpen, setIsOpen] = React.useState(false);
   const { messageRelativeTimestamp } = React.useContext(ClusterContext);
 
@@ -72,7 +77,9 @@ const Message: React.FC<Props> = ({
     jsonValue?: string,
     filters?: PreviewFilter[]
   ) => {
-    if (!filters?.length || !jsonValue) return jsonValue;
+    if (!jsonValue) return jsonValue;
+    if (!filters?.length)
+      return <HighlightedText text={jsonValue} terms={searchTerms} />;
     const parsedJson = getParsedJson(jsonValue);
 
     return (
@@ -81,9 +88,14 @@ const Message: React.FC<Props> = ({
           return (
             <div key={`${item.path}--${item.field}`}>
               {item.field}:{' '}
-              {JSON.stringify(
-                JSONPath({ path: item.path, json: parsedJson, wrap: false })
-              )}
+              <HighlightedText
+                text={
+                  JSON.stringify(
+                    JSONPath({ path: item.path, json: parsedJson, wrap: false })
+                  ) || ''
+                }
+                terms={searchTerms}
+              />
             </div>
           );
         })}
@@ -192,6 +204,7 @@ const Message: React.FC<Props> = ({
           valueDeserializeProperties={valueDeserializeProperties}
           keyDeserializeProperties={keyDeserializeProperties}
           actions={<MessageActions message={message} />}
+          searchTerms={searchTerms}
         />
       )}
     </>

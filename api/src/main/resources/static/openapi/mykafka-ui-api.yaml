@@ -14,7 +14,6 @@ tags:
   - name: Acls
   - name: Messages
   - name: Consumer Groups
-  - name: Cooperative Consumer Groups
   - name: Schemas
   - name: Kafka Connect
   - name: Ksql
@@ -1443,36 +1442,6 @@ paths:
           description: 'There is no content to send for this request, but the headers may be useful. '
       tags:
         - Consumer Groups
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ConsumerGroupOffsetsReset'
-  /api/clusters/{clusterName}/consumer-groups/{id}/offsets/cooperative:
-    post:
-      operationId: cooperativeResetConsumerGroupOffsets
-      summary: Reset offsets through cooperating active consumers while the group remains stable
-      parameters:
-        - name: clusterName
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: The request has succeeded.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CooperativeConsumerGroupOffsetsResetResponse'
-      tags:
-        - Cooperative Consumer Groups
       requestBody:
         required: true
         content:
@@ -2998,6 +2967,7 @@ paths:
     get:
       operationId: downloadMessages
       summary: Download last topic messages as ZIP
+      description: Supports searchMatch=ALL|ANY, searchScope=ALL|HEADERS, downloadMode, offset, timestamp, timestampTo and format=TEXT|JSON|VALUE_ONLY|CSV|NDJSON query parameters. Default limit and maximum are available from GET messages/download/settings for the same topic.
       parameters:
         - name: clusterName
           in: path
@@ -3124,6 +3094,7 @@ paths:
     get:
       operationId: getTopicMessagesV2
       summary: getTopicMessagesV2
+      description: Supports additional searchMatch=ALL|ANY and searchScope=ALL|HEADERS query parameters. Text terms are case-sensitive; smart filters are combined with AND.
       parameters:
         - name: clusterName
           in: path
@@ -3799,6 +3770,9 @@ components:
                     defaultPageSize:
                       type: integer
                       format: int32
+                    defaultDownloadLimit:
+                      type: integer
+                      format: int32
                     responseTimeoutMs:
                       type: integer
                       format: int32
@@ -4030,7 +4004,6 @@ components:
             type: string
             enum:
               - DYNAMIC_CONFIG
-              - COOPERATIVE_OFFSET_RESET
         build:
           type: object
           properties:
@@ -4862,7 +4835,7 @@ components:
             $ref: '#/components/schemas/PartitionOffset'
         waitForInactive:
           type: boolean
-          description: Wait up to 60 seconds for an active consumer group to become inactive before resetting offsets.
+          description: Wait until an active consumer group becomes inactive before resetting offsets, with no fixed timeout. Cancelling the request stops waiting but cannot undo a reset already applied.
     ConsumerGroupOffsetsResetPartitionPreview:
       type: object
       required:
@@ -4998,39 +4971,6 @@ components:
         - ZOOKEEPER
         - KRAFT
         - UNKNOWN
-    CooperativeConsumerGroupOffsetsResetPartition:
-      type: object
-      required:
-        - partition
-        - targetOffset
-        - memberId
-      properties:
-        partition:
-          type: integer
-          format: int32
-        previousOffset:
-          type: integer
-          format: int64
-        targetOffset:
-          type: integer
-          format: int64
-        memberId:
-          type: string
-    CooperativeConsumerGroupOffsetsResetResponse:
-      type: object
-      required:
-        - requestId
-        - groupState
-        - partitions
-      properties:
-        requestId:
-          type: string
-        groupState:
-          $ref: '#/components/schemas/ConsumerGroupState'
-        partitions:
-          type: array
-          items:
-            $ref: '#/components/schemas/CooperativeConsumerGroupOffsetsResetPartition'
     CreateConsumerAcl:
       type: object
       properties:

@@ -24,6 +24,31 @@ import org.junit.jupiter.api.Test;
 @SuppressWarnings("AvoidEscapedUnicodeCharacters")
 class MessageFiltersTest {
 
+  @Test
+  void independentlyMatchesAnyTermWithoutRequiringAllTerms() {
+    var filter = MessageFilters.search(List.of("1", "2", "3", "4"), true, false);
+    assertTrue(filter.test(msg().value("item 2")));
+    assertTrue(filter.test(msg().key("item 4")));
+    assertFalse(filter.test(msg().value("item 5")));
+    assertFalse(MessageFilters.search(List.of("1", "2"), false, false).test(msg().value("item 2")));
+  }
+
+  @Test
+  void headerOnlySearchDoesNotMatchPayloadOrKey() {
+    var filter = MessageFilters.search(List.of("trace", "request"), true, true);
+    assertFalse(filter.test(msg().key("trace").value("request")));
+    assertTrue(filter.test(msg().headers(Map.of("trace-id", "123"))));
+    assertTrue(filter.test(msg().headers(Map.of("id", "request-123"))));
+    assertFalse(filter.test(msg().headers(null)));
+  }
+
+  @Test
+  void emptySearchIsUnfilteredInBothMatchingModes() {
+    assertTrue(MessageFilters.search(List.of(), true, true).test(msg()));
+    assertTrue(MessageFilters.search(List.of(""), false, false).test(msg()));
+    assertTrue(MessageFilters.search(null, true, false).test(msg()));
+  }
+
   @Nested
   class StringContainsFilter {
 

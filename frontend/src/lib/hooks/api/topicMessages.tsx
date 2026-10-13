@@ -27,11 +27,10 @@ interface UseTopicMessagesProps {
   clusterName: ClusterName;
   topicName: TopicName;
   stringFilters?: string[];
+  enabled?: boolean;
 }
 
 const EMPTY_STRING_FILTERS: string[] = [];
-const MAX_LIVE_MESSAGES = Number(MESSAGES_PER_PAGE);
-
 type PendingMessage = {
   message: TopicMessage;
   shouldPrepend: boolean;
@@ -69,6 +68,40 @@ interface DownloadMessagesZipProps {
   timestamp?: string;
   timestampTo?: string;
   format?: string;
+  searchMatch?: string;
+  searchScope?: string;
+}
+
+export interface DownloadSettings {
+  defaultLimit: number;
+  maxLimit: number;
+}
+
+export function useDownloadSettings(
+  clusterName: ClusterName,
+  topicName: TopicName
+) {
+  return useSuspenseQuery<DownloadSettings>({
+    queryKey: [
+      'clusters',
+      clusterName,
+      'topics',
+      topicName,
+      'downloadSettings',
+    ],
+    queryFn: async () => {
+      const response = await fetch(
+        `${BASE_PARAMS.basePath}/api/clusters/${encodeURIComponent(clusterName)}/topics/${encodeURIComponent(topicName)}/messages/download/settings`,
+        { credentials: BASE_PARAMS.credentials as RequestCredentials }
+      );
+      if (!response.ok) {
+        await showServerError(response);
+        throw new Error('Failed to load download limits');
+      }
+      return response.json();
+    },
+    refetchOnWindowFocus: false,
+  });
 }
 
 export interface UploadMessagesFileResult {
@@ -147,8 +180,19 @@ export const useTopicMessages = ({
   clusterName,
   topicName,
   stringFilters = EMPTY_STRING_FILTERS,
+  enabled = true,
 }: UseTopicMessagesProps) => {
   const [searchParams] = useSearchParams();
+  const requestIdentity = JSON.stringify([
+    clusterName,
+    topicName,
+    searchParams.toString(),
+    stringFilters,
+    enabled,
+  ]);
+  const currentIdentity = useRef(requestIdentity);
+  currentIdentity.current = requestIdentity;
+  const [activeIdentity, setActiveIdentity] = React.useState<string>();
   const [messages, setMessages] = React.useState<TopicMessage[]>([]);
   const [phase, setPhase] = React.useState<string>();
   const [consumptionStats, setConsumptionStats] =
@@ -190,14 +234,25 @@ export const useTopicMessages = ({
     setMessages([]);
     setPhase(undefined);
     setConsumptionStats(undefined);
+    setActiveIdentity(requestIdentity);
+    setIsFetching(enabled);
+    setIsLiveStreamReady(false);
+    liveStreamReadyRef.current = false;
+    if (!enabled) {
+      controller.abort();
+      return undefined;
+    }
 
     const isCurrentRequest = () =>
-      abortController.current === controller && !controller.signal.aborted;
+      currentIdentity.current === requestIdentity &&
+      abortController.current === controller &&
+      !controller.signal.aborted;
 
-    const mode =
-      convertStrToPollingMode(
-        searchParams.get(MessagesFilterKeys.mode) || ''
-      ) || PollingMode.TAILING;
+    const mode = searchParams.has('orderBy')
+      ? PollingMode.EARLIEST
+      : convertStrToPollingMode(
+          searchParams.get(MessagesFilterKeys.mode) || ''
+        ) || PollingMode.TAILING;
     setIsLiveStreamReady(false);
     liveStreamReadyRef.current = false;
 
@@ -212,39 +267,63 @@ export const useTopicMessages = ({
       pendingMessages.current = [];
       if (messagesToFlush.length === 0) return;
 
-      startTransition(() => {
+      const updateMessages = () => {
         setMessages((previousMessages) => {
-          const nextMessages = [...previousMessages];
-          messagesToFlush.forEach(({ message, shouldPrepend }) => {
-            if (shouldPrepend) {
-              nextMessages.unshift(message);
-            } else {
-              nextMessages.push(message);
-            }
-          });
+          if (!isCurrentRequest()) return previousMessages;
+          const prepended = messagesToFlush
+            .filter(({ shouldPrepend }) => shouldPrepend)
+            .map(({ message }) => message)
+            .reverse();
+          const appended = messagesToFlush
+            .filter(({ shouldPrepend }) => !shouldPrepend)
+            .map(({ message }) => message);
+          const nextMessages = [...prepended, ...previousMessages, ...appended];
           return mode === PollingMode.TAILING
-            ? nextMessages.slice(0, MAX_LIVE_MESSAGES)
+            ? nextMessages.slice(
+                0,
+                Number(
+                  searchParams.get(MessagesFilterKeys.limit) ||
+                    MESSAGES_PER_PAGE
+                )
+              )
             : nextMessages;
         });
-      });
+      };
+      if (mode === PollingMode.TAILING) {
+        startTransition(updateMessages);
+      } else {
+        updateMessages();
+      }
     };
 
     const queueMessage = (message: TopicMessage, shouldPrepend: boolean) => {
       pendingMessages.current.push({ message, shouldPrepend });
+      if (shouldPrepend) {
+        const limit = Number(
+          searchParams.get(MessagesFilterKeys.limit) || MESSAGES_PER_PAGE
+        );
+        if (pendingMessages.current.length > limit) {
+          pendingMessages.current = pendingMessages.current.slice(-limit);
+        }
+      }
       if (scheduledMessageFlush.current === undefined) {
         scheduledMessageFlush.current =
           scheduleMessageFlush(flushPendingMessages);
       }
     };
 
-    const timestampToRaw = searchParams.get(MessagesFilterKeys.timestampTo);
+    const timestampToRaw = searchParams.has('orderBy')
+      ? null
+      : searchParams.get(MessagesFilterKeys.timestampTo);
 
     const fetchData = async () => {
       setIsFetching(true);
+      setPhase(undefined);
+      setConsumptionStats(undefined);
 
       const url = `${BASE_PARAMS.basePath}/api/clusters/${encodeURIComponent(
         clusterName
-      )}/topics/${topicName}/messages/v2`;
+      )}/topics/${encodeURIComponent(topicName)}/messages/v2`;
 
       const requestParams = new URLSearchParams({
         limit: searchParams.get(MessagesFilterKeys.limit) || MESSAGES_PER_PAGE,
@@ -255,6 +334,10 @@ export const useTopicMessages = ({
         MessagesFilterKeys.keySerde,
         MessagesFilterKeys.smartFilterId,
         MessagesFilterKeys.valueSerde,
+        'searchMatch',
+        'searchScope',
+        'orderBy',
+        'sortOrder',
       ].forEach((item) => {
         const value = searchParams.get(item);
         if (value) {
@@ -301,6 +384,7 @@ export const useTopicMessages = ({
 
       // filters stay the same and we have cursor set cursor
       if (
+        !searchParams.has('orderBy') &&
         requestKey === prevRequestKey.current &&
         nextCursor &&
         prevCursor.current < currentCursor
@@ -313,6 +397,15 @@ export const useTopicMessages = ({
       prevRequestKey.current = requestKey;
       prevCursor.current = currentCursor;
 
+      let errorReported = false;
+      const reportError = (error: unknown) => {
+        if (!isCurrentRequest() || errorReported) return;
+        errorReported = true;
+        setNextCursor(undefined);
+        setIsFetching(false);
+        showServerError(error);
+      };
+
       try {
         await fetchEventSource(`${url}?${requestParams.toString()}`, {
           method: 'GET',
@@ -324,18 +417,26 @@ export const useTopicMessages = ({
               // Reset list of messages.
               clearPendingMessages();
               setMessages([]);
-            } else if (status >= 400 && status < 500 && status !== 429) {
-              showServerError(response);
+            } else if (isCurrentRequest()) {
+              reportError(response);
+              throw new Error(`Message stream request failed (${status})`);
             }
           },
           onmessage(event) {
             if (!isCurrentRequest()) return;
 
+            if (!event.data) return;
             const parsedData: TopicMessageEvent = JSON.parse(event.data);
             const { message, consuming, cursor } = parsedData;
+            if (message?.timestamp) {
+              message.timestamp = new Date(message.timestamp);
+            }
 
-            if (useMessageFiltersStore.getState().nextCursor !== cursor?.id) {
-              setNextCursor(cursor?.id || undefined);
+            if (
+              cursor &&
+              useMessageFiltersStore.getState().nextCursor !== cursor.id
+            ) {
+              setNextCursor(cursor.id || undefined);
             }
 
             switch (parsedData.type) {
@@ -366,6 +467,10 @@ export const useTopicMessages = ({
           },
           onclose() {
             if (isCurrentRequest()) {
+              if (scheduledMessageFlush.current !== undefined) {
+                cancelMessageFlush(scheduledMessageFlush.current);
+              }
+              flushPendingMessages();
               setIsFetching(false);
             }
           },
@@ -374,18 +479,16 @@ export const useTopicMessages = ({
               throw err;
             }
 
-            setNextCursor(undefined);
-            setIsFetching(false);
-            showServerError(err);
+            reportError(err);
             throw err;
           },
         });
-      } catch {
-        // onerror has already shown the active request error; aborted requests need no UI update.
+      } catch (error) {
+        reportError(error);
       }
     };
 
-    fetchData().catch(() => undefined);
+    fetchData();
 
     return () => {
       controller.abort();
@@ -397,17 +500,23 @@ export const useTopicMessages = ({
   }, [
     clusterName,
     clearPendingMessages,
+    enabled,
+    requestIdentity,
     searchParams,
     stringFilters,
     topicName,
   ]);
 
   return {
-    phase,
-    messages,
-    consumptionStats,
-    isFetching,
-    isLiveStreamReady,
+    phase: activeIdentity === requestIdentity && enabled ? phase : undefined,
+    messages: activeIdentity === requestIdentity && enabled ? messages : [],
+    consumptionStats:
+      activeIdentity === requestIdentity && enabled
+        ? consumptionStats
+        : undefined,
+    isFetching: enabled && (activeIdentity !== requestIdentity || isFetching),
+    isLiveStreamReady:
+      activeIdentity === requestIdentity && enabled && isLiveStreamReady,
     abortFetchData,
   };
 };
@@ -440,6 +549,8 @@ export function useDownloadMessagesZip() {
       timestamp,
       timestampTo,
       format,
+      searchMatch,
+      searchScope,
     }: DownloadMessagesZipProps) => {
       const requestParams = new URLSearchParams({
         limit: limit.toString(),
@@ -464,6 +575,8 @@ export function useDownloadMessagesZip() {
         ['timestamp', timestamp],
         ['timestampTo', timestampTo],
         ['format', format],
+        ['searchMatch', searchMatch],
+        ['searchScope', searchScope],
       ];
 
       optionalParams.forEach(([key, value]) => {

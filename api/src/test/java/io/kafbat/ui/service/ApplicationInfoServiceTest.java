@@ -1,7 +1,6 @@
 package io.kafbat.ui.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -55,33 +54,19 @@ class ApplicationInfoServiceTest {
   }
 
   @Test
-  void exposesCooperativeOffsetResetOnlyWhenEnabled() {
-    var disabledFeatures = applicationInfoService(false, 10, false)
-        .getApplicationInfo()
-        .getEnabledFeatures();
-    var enabledFeatures = applicationInfoService(false, 10, true)
-        .getApplicationInfo()
-        .getEnabledFeatures();
-
-    assertFalse(disabledFeatures.contains(
-        io.kafbat.ui.model.ApplicationInfoDTO.EnabledFeaturesEnum.COOPERATIVE_OFFSET_RESET));
-    assertTrue(enabledFeatures.contains(
-        io.kafbat.ui.model.ApplicationInfoDTO.EnabledFeaturesEnum.COOPERATIVE_OFFSET_RESET));
+  void exposesOnlyDynamicConfigurationWhenEnabled() {
+    when(dynamicConfigOperations.dynamicConfigEnabled()).thenReturn(true);
+    assertEquals(
+        java.util.List.of(io.kafbat.ui.model.ApplicationInfoDTO.EnabledFeaturesEnum.DYNAMIC_CONFIG),
+        applicationInfoService(false, 10).getApplicationInfo().getEnabledFeatures());
   }
 
   private ApplicationInfoService applicationInfoService(boolean githubInfoEnabled, int githubApiMaxWaitTime) {
-    return applicationInfoService(githubInfoEnabled, githubApiMaxWaitTime, false);
-  }
-
-  private ApplicationInfoService applicationInfoService(boolean githubInfoEnabled,
-                                                        int githubApiMaxWaitTime,
-                                                        boolean cooperativeOffsetResetEnabled) {
     return new ApplicationInfoService(
         dynamicConfigOperations,
         null,
         null,
         null,
-        cooperativeOffsetResetEnabled,
         githubInfoEnabled,
         githubApiMaxWaitTime
     );

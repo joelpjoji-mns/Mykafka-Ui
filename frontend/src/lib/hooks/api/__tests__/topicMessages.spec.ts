@@ -115,6 +115,33 @@ describe('Topic Messages hooks', () => {
     unmount();
   });
 
+  it('forwards whole-topic sorting and forces a finite scan instead of live mode', async () => {
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(
+        MemoryRouter,
+        {
+          initialEntries: [
+            '/?mode=TAILING&orderBy=size&sortOrder=DESC&limit=1000',
+          ],
+        },
+        children
+      );
+    const { unmount } = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper }
+    );
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalled());
+    const params = new URL(
+      (fetchEventSource as jest.Mock).mock.calls.at(-1)[0],
+      'http://localhost'
+    ).searchParams;
+    expect(params.get('mode')).toBe('EARLIEST');
+    expect(params.get('orderBy')).toBe('size');
+    expect(params.get('sortOrder')).toBe('DESC');
+    expect(params.get('limit')).toBe('1000');
+    unmount();
+  });
+
   it('keeps a refreshed stream cancellable when the previous stream closes', async () => {
     const { result, rerender, unmount } = renderHook(
       ({ stringFilters }) =>
@@ -178,6 +205,68 @@ describe('Topic Messages hooks', () => {
     unmount();
   });
 
+  it('aborts while the search draft is pending and ignores obsolete stream events', async () => {
+    const { result, rerender, unmount } = renderHook(
+      ({ enabled, stringFilters }) =>
+        hooks.useTopicMessages({
+          clusterName,
+          topicName,
+          enabled,
+          stringFilters,
+        }),
+      {
+        initialProps: { enabled: true, stringFilters: ['first'] },
+        wrapper: TimeRangeMessagesHookRouter,
+      }
+    );
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
+    const oldStream = (fetchEventSource as jest.Mock).mock.calls[0][1];
+    act(() => {
+      oldStream.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 1, value: 'first-result' },
+        }),
+      });
+      oldStream.onclose();
+    });
+    expect(result.current.messages.map((message) => message.value)).toEqual([
+      'first-result',
+    ]);
+    expect(result.current.isFetching).toBe(false);
+    rerender({ enabled: false, stringFilters: ['first'] });
+    expect(oldStream.signal.aborted).toBe(true);
+    expect(result.current.messages).toEqual([]);
+    expect(fetchEventSource).toHaveBeenCalledTimes(1);
+    act(() => {
+      oldStream.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 2, value: 'obsolete-result' },
+        }),
+      });
+    });
+    expect(result.current.messages).toEqual([]);
+    rerender({ enabled: true, stringFilters: ['second'] });
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(2));
+    expect(result.current.messages).toEqual([]);
+    const newStream = (fetchEventSource as jest.Mock).mock.calls[1][1];
+    act(() => {
+      newStream.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 3, value: 'second-result' },
+        }),
+      });
+      newStream.onclose();
+    });
+    expect(result.current.messages.map((message) => message.value)).toEqual([
+      'second-result',
+    ]);
+    expect(result.current.isFetching).toBe(false);
+    unmount();
+  });
+
   it('surfaces an active stream error once and stops the retry loop', async () => {
     const { result, unmount } = renderHook(
       () => hooks.useTopicMessages({ clusterName, topicName }),
@@ -194,6 +283,44 @@ describe('Topic Messages hooks', () => {
 
     expect(showServerError).toHaveBeenCalledWith(error);
     await waitFor(() => expect(result.current.isFetching).toBe(false));
+    unmount();
+  });
+
+  it('reports failures that occur before stream callbacks and stops loading', async () => {
+    const error = new Error('Unable to start message stream');
+    (fetchEventSource as jest.Mock).mockRejectedValueOnce(error);
+    const { result, unmount } = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper: MessagesHookRouter }
+    );
+
+    await waitFor(() => expect(showServerError).toHaveBeenCalledWith(error));
+    expect(showServerError).toHaveBeenCalledTimes(1);
+    expect(result.current.isFetching).toBe(false);
+    unmount();
+  });
+
+  it('rejects an unsuccessful stream response without duplicate error alerts', async () => {
+    const { result, unmount } = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper: MessagesHookRouter }
+    );
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
+    const options = (fetchEventSource as jest.Mock).mock.calls[0][1];
+    const response = { ok: false, status: 403 };
+
+    await act(async () => {
+      await expect(options.onopen(response)).rejects.toThrow(
+        'Message stream request failed (403)'
+      );
+      expect(() => options.onerror(new Error('Forbidden'))).toThrow(
+        'Forbidden'
+      );
+    });
+
+    expect(showServerError).toHaveBeenCalledTimes(1);
+    expect(showServerError).toHaveBeenCalledWith(response);
+    expect(result.current.isFetching).toBe(false);
     unmount();
   });
 

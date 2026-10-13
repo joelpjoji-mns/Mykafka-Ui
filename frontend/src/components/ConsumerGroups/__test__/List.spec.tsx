@@ -7,6 +7,8 @@ import {
 } from 'lib/hooks/api/consumers';
 import List from 'components/ConsumerGroups/List';
 
+const mockSearchParams = new URLSearchParams();
+
 // Mock hooks
 jest.mock('lib/hooks/api/consumers', () => ({
   useConsumerGroups: jest.fn(),
@@ -15,7 +17,7 @@ jest.mock('lib/hooks/api/consumers', () => ({
 
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
-  useSearchParams: () => [new URLSearchParams(), jest.fn()],
+  useSearchParams: () => [mockSearchParams, jest.fn()],
   useNavigate: () => jest.fn(),
 }));
 
@@ -24,6 +26,8 @@ const mockUseConsumerGroupsLag = useGetConsumerGroupsLag as jest.Mock;
 
 describe('ConsumerGroups List', () => {
   beforeEach(() => {
+    mockSearchParams.delete('q');
+    mockUseConsumerGroups.mockClear();
     mockUseConsumerGroups.mockImplementation(() => ({
       data: {
         consumerGroups: [
@@ -64,5 +68,18 @@ describe('ConsumerGroups List', () => {
     const tableRows = screen.getAllByRole('row');
     expect(tableRows[1]).toHaveTextContent('0');
     expect(tableRows[2]).toHaveTextContent('N/A');
+  });
+
+  it('passes comma-separated search to the server without filtering only the current page', () => {
+    mockSearchParams.set('q', 'abcd, uhdg');
+    render(<List />);
+    expect(
+      screen.getByPlaceholderText(
+        'Search by Consumer Group ID, e.g. abcd, uhdg'
+      )
+    ).toHaveValue('abcd, uhdg');
+    expect(mockUseConsumerGroups).toHaveBeenCalledWith(
+      expect.objectContaining({ search: 'abcd, uhdg' })
+    );
   });
 });

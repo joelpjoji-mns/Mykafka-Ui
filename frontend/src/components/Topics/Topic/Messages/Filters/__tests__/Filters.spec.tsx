@@ -163,11 +163,11 @@ describe('Filters component', () => {
     });
   });
 
-  it('defaults the message limit to 500 and caps it at 5000', async () => {
+  it('defaults the message limit to 1000 and caps it at 5000', async () => {
     renderComponent();
     const messageLimit = screen.getByLabelText('Message limit');
 
-    expect(messageLimit).toHaveValue('500');
+    expect(messageLimit).toHaveValue('1000');
 
     await userEvent.clear(messageLimit);
     await userEvent.type(messageLimit, '9999');

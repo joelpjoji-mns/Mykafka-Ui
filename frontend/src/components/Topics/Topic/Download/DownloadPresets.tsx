@@ -24,6 +24,8 @@ export interface DownloadConfig {
   smartFilterId: string;
   keySerde?: string;
   valueSerde?: string;
+  searchMatch?: string;
+  searchScope?: string;
 }
 
 type LegacyDownloadConfig = Omit<DownloadConfig, 'searchFilters'> & {

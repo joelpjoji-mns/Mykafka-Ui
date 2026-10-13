@@ -178,6 +178,7 @@ export const clusterTopicCopyPath = (
 // Topics topic
 export const clusterTopicSettingsRelativePath = 'settings';
 export const clusterTopicMessagesRelativePath = 'messages';
+export const clusterTopicSearchRelativePath = 'search';
 export const clusterTopicDownloadRelativePath = 'download';
 export const clusterTopicUploadRelativePath = 'upload';
 export const clusterTopicConsumerGroupsRelativePath = 'consumer-groups';

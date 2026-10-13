@@ -121,7 +121,7 @@ class OffsetsResetServiceActiveGroupTest {
   }
 
   @Test
-  void doesNotChangeOffsetsWhenAnActiveGroupDoesNotStopBeforeTheWaitWindow() {
+  void waitsBeyondTheOldTimeoutAndCancelsWithoutChangingOffsets() {
     String groupId = "orders-consumer";
     TopicPartition partition = new TopicPartition("orders", 0);
     KafkaCluster cluster = KafkaCluster.builder().name("test").build();
@@ -136,10 +136,8 @@ class OffsetsResetServiceActiveGroupTest {
 
     StepVerifier.withVirtualTime(() ->
             service.resetToOffsets(cluster, groupId, partition.topic(), Map.of(0, 5L), true))
-        .thenAwait(Duration.ofSeconds(60))
-        .expectErrorMatches(error ->
-            error instanceof io.kafbat.ui.exception.ValidationException
-                && error.getMessage().contains("offsets were not changed"))
+        .thenAwait(Duration.ofHours(2))
+        .thenCancel()
         .verify();
 
     Mockito.verify(adminClient, Mockito.never())

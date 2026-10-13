@@ -4,7 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { render } from 'lib/testHelpers';
 import Download from 'components/Topics/Topic/Download/Download';
 import { useTopicDetails } from 'lib/hooks/api/topics';
-import { useDownloadMessagesZip, useSerdes } from 'lib/hooks/api/topicMessages';
+import {
+  useDownloadMessagesZip,
+  useDownloadSettings,
+  useSerdes,
+} from 'lib/hooks/api/topicMessages';
 import useAppParams from 'lib/hooks/useAppParams';
 import { MessagesFilterKeys } from 'lib/constants';
 import { saveMessageViewFilterSnapshot } from 'lib/messageViewFilterSnapshot';
@@ -19,6 +23,7 @@ jest.mock('lib/hooks/api/topics', () => ({
 jest.mock('lib/hooks/api/topicMessages', () => ({
   useDownloadMessagesZip: jest.fn(),
   useSerdes: jest.fn(),
+  useDownloadSettings: jest.fn(),
 }));
 
 jest.mock('lib/hooks/useAppParams', () => ({
@@ -31,6 +36,9 @@ describe('Download', () => {
     localStorage.clear();
     sessionStorage.clear();
     mutate.mockReset();
+    (useDownloadSettings as jest.Mock).mockReturnValue({
+      data: { defaultLimit: 5000, maxLimit: 5000 },
+    });
     (useAppParams as jest.Mock).mockReturnValue({
       clusterName: 'test-cluster',
       topicName: 'test-topic',
@@ -90,7 +98,7 @@ describe('Download', () => {
     render(<Download />);
     const messageLimit = screen.getByLabelText('Max messages');
 
-    expect(messageLimit).toHaveValue('500');
+    expect(messageLimit).toHaveValue('5000');
 
     await userEvent.clear(messageLimit);
     await userEvent.type(messageLimit, '9999');

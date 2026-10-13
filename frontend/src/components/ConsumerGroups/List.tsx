@@ -160,7 +160,7 @@ const List = () => {
       <ControlPanelWrapper hasInput>
         <Search
           key={clusterName}
-          placeholder="Search by Consumer Group ID"
+          placeholder="Search by Consumer Group ID, e.g. abcd, uhdg"
           extraActions={<Fts resourceName="consumer_groups" />}
         />
         <RefreshRateSelect storageKey="consumer-groups-refresh-rate" />

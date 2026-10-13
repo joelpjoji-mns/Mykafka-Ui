@@ -13,14 +13,14 @@ import {
   getSerdeOptions,
 } from 'components/Topics/Topic/SendMessage/utils';
 import { useTopicDetails } from 'lib/hooks/api/topics';
-import { useDownloadMessagesZip, useSerdes } from 'lib/hooks/api/topicMessages';
+import {
+  useDownloadMessagesZip,
+  useDownloadSettings,
+  useSerdes,
+} from 'lib/hooks/api/topicMessages';
 import useAppParams from 'lib/hooks/useAppParams';
 import { RouteParamsClusterTopic } from 'lib/paths';
-import {
-  MAX_MESSAGES_PER_PAGE,
-  MESSAGES_PER_PAGE,
-  MessagesFilterKeys,
-} from 'lib/constants';
+import { MessagesFilterKeys } from 'lib/constants';
 import { getMessageViewFilterSnapshot } from 'lib/messageViewFilterSnapshot';
 
 import DownloadPresets, { DownloadConfig } from './DownloadPresets';
@@ -79,17 +79,17 @@ const toEpochMillis = (value: string) => {
   return Number.isNaN(timestamp) ? undefined : timestamp.toString();
 };
 
-const numericValue = (value: string, fallback: number) => {
+const numericValue = (value: string, fallback: number, maxLimit: number) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0
-    ? Math.min(Math.trunc(parsed), MAX_MESSAGES_PER_PAGE)
+    ? Math.min(Math.trunc(parsed), maxLimit)
     : fallback;
 };
 
-const normalizeLimitInput = (value: string) => {
+const normalizeLimitInput = (value: string, maxLimit: number) => {
   const numericInput = value.replace(/\D/g, '');
   return numericInput
-    ? Math.min(Number(numericInput), MAX_MESSAGES_PER_PAGE).toString()
+    ? Math.min(Number(numericInput), maxLimit).toString()
     : '';
 };
 
@@ -126,6 +126,10 @@ const isDownloadMode = (mode: string | null): mode is DownloadMode =>
 
 const Download: React.FC = () => {
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
+  const { data: downloadSettings } = useDownloadSettings(
+    clusterName,
+    topicName
+  );
   const { data: topic } = useTopicDetails({ clusterName, topicName });
   const { data: serdes = {} } = useSerdes({
     clusterName,
@@ -139,7 +143,9 @@ const Download: React.FC = () => {
     PartitionOption[]
   >([]);
   const [downloadMode, setDownloadMode] = useState<DownloadMode>('LATEST');
-  const [limit, setLimit] = useState(MESSAGES_PER_PAGE);
+  const [limit, setLimit] = useState(downloadSettings.defaultLimit.toString());
+  const [searchMatch, setSearchMatch] = useState('ALL');
+  const [searchScope, setSearchScope] = useState('ALL');
   const [offset, setOffset] = useState('0');
   const [fromTime, setFromTime] = useState('');
   const [toTime, setToTime] = useState('');
@@ -170,7 +176,11 @@ const Download: React.FC = () => {
     downloadMode === 'FROM_TIMESTAMP' || downloadMode === 'TIMEFRAME';
   const isToTimeVisible =
     downloadMode === 'TO_TIMESTAMP' || downloadMode === 'TIMEFRAME';
-  const resolvedLimit = numericValue(limit, Number(MESSAGES_PER_PAGE));
+  const resolvedLimit = numericValue(
+    limit,
+    downloadSettings.defaultLimit,
+    downloadSettings.maxLimit
+  );
   const selectedPartitionValues =
     partitionMode === 'SELECTED'
       ? selectedPartitions.map(({ value }) => value)
@@ -211,13 +221,15 @@ const Download: React.FC = () => {
     smartFilterId,
     keySerde,
     valueSerde,
+    searchMatch,
+    searchScope,
   };
 
   const applyPreset = (config: DownloadConfig) => {
     setPartitionMode(config.partitionMode);
     setSelectedPartitions(config.selectedPartitions ?? []);
     setDownloadMode(config.downloadMode as DownloadMode);
-    setLimit(normalizeLimitInput(config.limit));
+    setLimit(normalizeLimitInput(config.limit, downloadSettings.maxLimit));
     setOffset(config.offset);
     setFromTime(config.fromTime);
     setToTime(config.toTime);
@@ -226,11 +238,15 @@ const Download: React.FC = () => {
     setSmartFilterId(config.smartFilterId);
     setKeySerde(config.keySerde);
     setValueSerde(config.valueSerde);
+    setSearchMatch(config.searchMatch || 'ALL');
+    setSearchScope(config.searchScope || 'ALL');
   };
 
   const importMessageViewFilters = () => {
     const snapshot = getMessageViewFilterSnapshot(clusterName, topicName);
     if (!snapshot) return;
+    setSearchMatch(snapshot.get('searchMatch') || 'ALL');
+    setSearchScope(snapshot.get('searchScope') || 'ALL');
 
     const importedPartitions = toPartitionOptions(
       snapshot.get(MessagesFilterKeys.partitions)
@@ -302,6 +318,8 @@ const Download: React.FC = () => {
       timestamp,
       timestampTo,
       format,
+      searchMatch,
+      searchScope,
     });
   };
 
@@ -396,7 +414,9 @@ const Download: React.FC = () => {
                 onChange={({
                   target: { value },
                 }: ChangeEvent<HTMLInputElement>) => {
-                  setLimit(normalizeLimitInput(value));
+                  setLimit(
+                    normalizeLimitInput(value, downloadSettings.maxLimit)
+                  );
                 }}
               />
             </Field>
@@ -452,6 +472,9 @@ const Download: React.FC = () => {
               </Field>
             )}
           </FlexBox>
+          <Description>
+            Configured export maximum: {downloadSettings.maxLimit} messages.
+          </Description>
         </Card>
 
         <Card>
@@ -494,6 +517,26 @@ const Download: React.FC = () => {
 
         <Card>
           <CardTitle>4. Refine export</CardTitle>
+          <FlexBox gap="12px" flexWrap="wrap">
+            <Select
+              id="downloadSearchMatch"
+              value={searchMatch}
+              onChange={setSearchMatch}
+              options={[
+                { label: 'Match all terms (AND)', value: 'ALL' },
+                { label: 'Match any term (OR)', value: 'ANY' },
+              ]}
+            />
+            <Select
+              id="downloadSearchScope"
+              value={searchScope}
+              onChange={setSearchScope}
+              options={[
+                { label: 'Key, value and headers', value: 'ALL' },
+                { label: 'Headers only', value: 'HEADERS' },
+              ]}
+            />
+          </FlexBox>
           <FlexBox gap="12px" flexWrap="wrap" alignItems="flex-end">
             <Field>
               <Label>Search messages</Label>

@@ -7,7 +7,8 @@ import {
   PollingMode,
   TopicMessageConsuming,
 } from 'generated-sources';
-import React, { ChangeEvent, useMemo, useState } from 'react';
+import React, { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import MultiSelect from 'components/common/MultiSelect/MultiSelect.styled';
 import Select, { SelectOption } from 'components/common/Select/Select';
 import { Button } from 'components/common/Button/Button';
@@ -18,7 +19,10 @@ import { getSerdeOptions } from 'components/Topics/Topic/SendMessage/utils';
 import { useSerdes } from 'lib/hooks/api/topicMessages';
 import useAppParams from 'lib/hooks/useAppParams';
 import { RouteParamsClusterTopic } from 'lib/paths';
-import { useMessagesFilters } from 'lib/hooks/useMessagesFilters';
+import {
+  normalizeMessageLimit,
+  useMessagesFilters,
+} from 'lib/hooks/useMessagesFilters';
 import { ModeOptions } from 'lib/hooks/filterUtils';
 import { useTopicDetails } from 'lib/hooks/api/topics';
 import EditIcon from 'components/common/Icons/EditIcon';
@@ -40,6 +44,7 @@ import FiltersMetrics from './FiltersMetrics';
 import TimeRangeSelector from './TimeRangeSelector';
 
 export interface FiltersProps {
+  hideSearch?: boolean;
   phaseMessage?: string;
   consumptionStats?: TopicMessageConsuming;
   isFetching: boolean;
@@ -62,6 +67,7 @@ const Filters: React.FC<FiltersProps> = ({
   phaseMessage,
   stringFilters,
   setStringFilter,
+  hideSearch = false,
 }) => {
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
 
@@ -88,6 +94,10 @@ const Filters: React.FC<FiltersProps> = ({
     setSmartFilter,
     refreshData,
   } = useMessagesFilters(topicName);
+  const [params] = useSearchParams();
+  const wholeTopic = params.has('orderBy');
+  const [limitDraft, setLimitDraft] = useState(limit);
+  useEffect(() => setLimitDraft(limit), [limit]);
 
   const { data: topic } = useTopicDetails({ clusterName, topicName });
   const [createdEditedSmartId, setCreatedEditedSmartId] = useState<string>();
@@ -162,6 +172,7 @@ const Filters: React.FC<FiltersProps> = ({
           <S.FilterModeTypeSelectorWrapper>
             <S.FilterModeTypeSelect
               id="selectSeekType"
+              disabled={wholeTopic}
               onChange={handleModeChange}
               value={selectedSeekMode}
               selectSize="M"
@@ -203,21 +214,23 @@ const Filters: React.FC<FiltersProps> = ({
               ))
             )}
           </S.FilterModeTypeSelectorWrapper>
-          <S.LiveUpdatesControl title="New messages appear at the top">
-            <Switch
-              name="liveUpdates"
-              ariaLabel="Live updates"
-              checked={mode === PollingMode.TAILING}
-              onChange={handleLiveUpdatesChange}
-            />
-            <S.LiveUpdatesLabel>Live</S.LiveUpdatesLabel>
-            <S.LiveUpdatesIndicator
-              $active={mode === PollingMode.TAILING}
-              aria-hidden
-            />
-          </S.LiveUpdatesControl>
+          {!wholeTopic && (
+            <S.LiveUpdatesControl title="New messages appear at the top">
+              <Switch
+                name="liveUpdates"
+                ariaLabel="Live updates"
+                checked={mode === PollingMode.TAILING}
+                onChange={handleLiveUpdatesChange}
+              />
+              <S.LiveUpdatesLabel>Live</S.LiveUpdatesLabel>
+              <S.LiveUpdatesIndicator
+                $active={mode === PollingMode.TAILING}
+                aria-hidden
+              />
+            </S.LiveUpdatesControl>
+          )}
           <MultiSelect
-            disabled={isLoading}
+            disabled={isLoading || wholeTopic}
             options={partitions.list}
             filterOptions={filterOptions}
             onChange={setPartition}
@@ -254,13 +267,20 @@ const Filters: React.FC<FiltersProps> = ({
             pattern="[0-9]*"
             maxLength={4}
             inputSize="M"
-            value={limit}
+            value={limitDraft}
             aria-label="Message limit"
             placeholder="Limit"
             onChange={({
               target: { value },
             }: ChangeEvent<HTMLInputElement>) => {
-              setLimit(value.replace(/\D/g, ''));
+              const digits = value.replace(/\D/g, '');
+              setLimitDraft(digits ? normalizeMessageLimit(digits) : '');
+              if (digits) setLimit(digits);
+            }}
+            onBlur={() => {
+              const normalized = normalizeMessageLimit(limitDraft);
+              setLimitDraft(normalized);
+              setLimit(normalized);
             }}
           />
           <Button
@@ -274,15 +294,17 @@ const Filters: React.FC<FiltersProps> = ({
           </Button>
         </S.ToolbarControls>
 
-        <S.ToolbarSearch>
-          <Search
-            placeholder="Search"
-            value={search}
-            onChange={handleSearchChange}
-          />
-        </S.ToolbarSearch>
+        {!hideSearch && (
+          <S.ToolbarSearch>
+            <Search
+              placeholder="Search"
+              value={search}
+              onChange={handleSearchChange}
+            />
+          </S.ToolbarSearch>
+        )}
       </S.Toolbar>
-      {displayedStringFilters.length > 0 && (
+      {!hideSearch && displayedStringFilters.length > 0 && (
         <FlexBox
           width="100%"
           justifyContent="flex-end"

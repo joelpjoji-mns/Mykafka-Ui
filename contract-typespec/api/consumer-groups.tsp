@@ -96,20 +96,6 @@ interface ConsumerGroupsApi {
   ): void;
 }
 
-@route("/api/clusters/{clusterName}/consumer-groups")
-@tag("Cooperative Consumer Groups")
-interface CooperativeConsumerGroupsApi {
-  @post
-  @route("/{id}/offsets/cooperative")
-  @operationId("cooperativeResetConsumerGroupOffsets")
-  @summary("Reset offsets through cooperating active consumers while the group remains stable")
-  cooperativeResetConsumerGroupOffsets(
-    @path clusterName: string,
-    @path id: string,
-    @body reset: ConsumerGroupOffsetsReset,
-  ): CooperativeConsumerGroupOffsetsResetResponse;
-}
-
 @route("/api/clusters/{clusterName}/topics/{topicName}/consumer-groups")
 @tag("Consumer Groups")
 interface TopicConsumerGroupsApi {
@@ -173,7 +159,7 @@ model ConsumerGroupOffsetsReset {
   partitions?: int32[];
   resetToTimestamp?: int64;
   partitionsOffsets?: PartitionOffset[];
-  @doc("Wait up to 60 seconds for an active consumer group to become inactive before resetting offsets.")
+  @doc("Wait until an active consumer group becomes inactive before resetting offsets, with no fixed timeout. Cancelling the request stops waiting but cannot undo a reset already applied.")
   waitForInactive?: boolean;
 }
 
@@ -181,19 +167,6 @@ model ConsumerGroupOffsetsResetPreview {
   topic: string;
   resetType: ConsumerGroupOffsetsResetType;
   partitions: ConsumerGroupOffsetsResetPartitionPreview[];
-}
-
-model CooperativeConsumerGroupOffsetsResetResponse {
-  requestId: string;
-  groupState: ConsumerGroupState;
-  partitions: CooperativeConsumerGroupOffsetsResetPartition[];
-}
-
-model CooperativeConsumerGroupOffsetsResetPartition {
-  partition: int32;
-  previousOffset?: int64;
-  targetOffset: int64;
-  memberId: string;
 }
 
 model ConsumerGroupOffsetsResetPartitionPreview {
@@ -251,4 +224,3 @@ model PartitionOffset {
   partition: int32;
   offset?: int64;
 }
-

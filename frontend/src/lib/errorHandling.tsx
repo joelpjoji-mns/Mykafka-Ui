@@ -31,6 +31,27 @@ export const getResponse = async (error: unknown): Promise<ServerResponse> => {
     return apiError;
   }
 
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'statusText' in error &&
+    typeof error.statusText === 'string'
+  ) {
+    return {
+      statusText: error.statusText,
+      status:
+        'status' in error && typeof error.status === 'number'
+          ? error.status
+          : undefined,
+      url:
+        'url' in error && typeof error.url === 'string' ? error.url : undefined,
+      message:
+        'message' in error && typeof error.message === 'string'
+          ? error.message
+          : undefined,
+    };
+  }
+
   return {
     statusText: 'Unknown error',
     message: error instanceof Error ? error.message : 'Unknown error',
@@ -76,27 +97,22 @@ export const showSuccessAlert = (options: AlertOptions) => {
 };
 
 export const showServerError = async (
-  response: Response,
+  response: unknown,
   options?: AlertOptions
 ) => {
-  let body: Record<string, string> = {};
-  try {
-    body = await response.json();
-  } catch {
-    // do nothing;
-  }
-  if (response.status) {
+  const error = await getResponse(response);
+  if (error.status) {
     showAlert('error', {
-      id: response.url,
-      title: `${response.status} ${response.statusText}`,
-      message: body?.message || 'An error occurred',
+      id: error.url,
+      title: `${error.status} ${error.statusText}`,
+      message: error.message || 'An error occurred',
       ...options,
     });
   } else {
     showAlert('error', {
       id: 'server-error',
       title: `Something went wrong`,
-      message: 'An error occurred',
+      message: error.message || 'An error occurred',
       ...options,
     });
   }

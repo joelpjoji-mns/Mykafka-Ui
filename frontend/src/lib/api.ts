@@ -8,7 +8,6 @@ import {
   Configuration,
   KafkaConnectApi,
   ConsumerGroupsApi,
-  CooperativeConsumerGroupsApi,
   AuthorizationApi,
   ApplicationConfigApi,
   AclsApi,
@@ -30,8 +29,6 @@ export const messagesApiClient = new MessagesApi(apiClientConf);
 export const clustersApiClient = new ClustersApi(apiClientConf);
 export const kafkaConnectApiClient = new KafkaConnectApi(apiClientConf);
 export const consumerGroupsApiClient = new ConsumerGroupsApi(apiClientConf);
-export const cooperativeConsumerGroupsApiClient =
-  new CooperativeConsumerGroupsApi(apiClientConf);
 export const authApiClient = new AuthorizationApi(apiClientConf);
 export const appConfigApiClient = new ApplicationConfigApi(apiClientConf);
 export const aclApiClient = new AclsApi(apiClientConf);

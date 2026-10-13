@@ -67,7 +67,10 @@ const DESCMixin = css(
   `
 );
 
-export const Title = styled.span<TitleProps>(
+export const Title = styled.span.withConfig({
+  shouldForwardProp: (prop) =>
+    !['isOrderable', 'isOrdered', 'sortOrder'].includes(prop),
+})<TitleProps>(
   ({ isOrderable, isOrdered, sortOrder, theme: { table } }) => css`
     font-family: Inter, sans-serif;
     font-size: 12px;

@@ -34,7 +34,6 @@ import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 dependencies {
     implementation project(":contract")
     implementation project(":serde-api")
-    implementation project(":cooperative-reset")
     implementation libs.spring.starter.webflux
     implementation libs.spring.starter.security
     implementation libs.spring.starter.actuator
@@ -239,4 +238,3 @@ if (includeFrontend) {
         dependsOn(":frontend:buildFrontend")
     }
 }
-

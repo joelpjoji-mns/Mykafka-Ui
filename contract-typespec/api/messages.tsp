@@ -81,6 +81,7 @@ interface MessagesApi {
   @route("/messages/v2")
   @operationId("getTopicMessagesV2")
   @summary("getTopicMessagesV2")
+  @doc("Supports additional searchMatch=ALL|ANY and searchScope=ALL|HEADERS query parameters. Text terms are case-sensitive; smart filters are combined with AND.")
   getTopicMessagesV2(
     @path clusterName: string,
     @path topicName: string,
@@ -101,6 +102,7 @@ interface MessagesApi {
   @route("/messages/download")
   @operationId("downloadMessages")
   @summary("Download last topic messages as ZIP")
+  @doc("Supports searchMatch=ALL|ANY, searchScope=ALL|HEADERS, downloadMode, offset, timestamp, timestampTo and format=TEXT|JSON|VALUE_ONLY|CSV|NDJSON query parameters. Default limit and maximum are available from GET messages/download/settings for the same topic.")
   downloadMessages(
     @path clusterName: string,
     @path topicName: string,

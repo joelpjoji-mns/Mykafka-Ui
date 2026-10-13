@@ -13,6 +13,7 @@ import {
   clusterTopicDataProfilePath,
   clusterTopicEditPath,
   clusterTopicMessagesPath,
+  clusterTopicSearchRelativePath,
   clusterTopicPath,
   clusterTopicSettingsPath,
   clusterTopicStatisticsPath,
@@ -104,6 +105,12 @@ export const getTopicPageTitle = (
 ) => {
   if (pathname === clusterTopicMessagesPath(clusterName, topicName)) {
     return buildPageTitle('Messages', topicName, clusterName);
+  }
+  if (
+    pathname ===
+    `${clusterTopicPath(clusterName, topicName)}/${clusterTopicSearchRelativePath}`
+  ) {
+    return buildPageTitle('Search', topicName, clusterName);
   }
 
   if (pathname === clusterTopicSettingsPath(clusterName, topicName)) {

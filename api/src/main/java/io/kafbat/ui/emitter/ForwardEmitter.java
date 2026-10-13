@@ -13,6 +13,26 @@ import org.apache.kafka.common.TopicPartition;
 
 public class ForwardEmitter extends RangePollingEmitter {
 
+  public static ForwardEmitter fullScan(Supplier<EnhancedConsumer> consumerSupplier,
+                                       ConsumerPosition consumerPosition,
+                                       int batchSize,
+                                       ConsumerRecordDeserializer deserializer,
+                                       Predicate<TopicMessageDTO> filter,
+                                       PollingSettings pollingSettings,
+                                       Cursor.Tracking cursor) {
+    return new ForwardEmitter(consumerSupplier, consumerPosition, batchSize,
+        MessagesProcessing.create(deserializer, filter, true, null), pollingSettings, cursor);
+  }
+
+  private ForwardEmitter(Supplier<EnhancedConsumer> consumerSupplier,
+                         ConsumerPosition consumerPosition,
+                         int batchSize,
+                         MessagesProcessing processing,
+                         PollingSettings pollingSettings,
+                         Cursor.Tracking cursor) {
+    super(consumerSupplier, consumerPosition, batchSize, processing, pollingSettings, cursor);
+  }
+
   public ForwardEmitter(Supplier<EnhancedConsumer> consumerSupplier,
                         ConsumerPosition consumerPosition,
                         int messagesPerPage,

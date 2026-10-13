@@ -55,6 +55,7 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.codec.multipart.FormFieldPart;
 import org.springframework.http.codec.multipart.Part;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -70,6 +71,27 @@ public class MessagesController extends AbstractController implements MessagesAp
 
   private final MessagesService messagesService;
   private final DeserializationService deserializationService;
+
+  @GetMapping("/api/clusters/{clusterName}/topics/{topicName}/messages/download/settings")
+  public Mono<ResponseEntity<MessagesService.DownloadSettings>> downloadSettings(
+      @PathVariable String clusterName, @PathVariable String topicName) {
+    var context = AccessContext.builder()
+        .cluster(clusterName)
+        .topicActions(topicName, MESSAGES_READ)
+        .operationName("downloadSettings")
+        .build();
+    return validateAccess(context)
+        .then(Mono.fromSupplier(() -> ResponseEntity.ok(messagesService.downloadSettings())))
+        .doOnEach(sig -> audit(context, sig));
+  }
+
+  private boolean searchOption(ServerWebExchange exchange, String name, String defaultValue, String alternative) {
+    String value = Optional.ofNullable(firstQueryParam(exchange, name)).orElse(defaultValue);
+    if (!value.equals(defaultValue) && !value.equals(alternative)) {
+      throw new ValidationException(name + " must be " + defaultValue + " or " + alternative);
+    }
+    return value.equals(alternative);
+  }
 
   @Override
   public Mono<ResponseEntity<Void>> deleteTopicMessages(
@@ -132,7 +154,9 @@ public class MessagesController extends AbstractController implements MessagesAp
                   queryParamAsLong(exchange, "offset"),
                   queryParamAsLong(exchange, "timestamp"),
                   queryParamAsLong(exchange, "timestampTo"),
-                  format
+                  format,
+                  searchOption(exchange, "searchMatch", "ALL", "ANY"),
+                  searchOption(exchange, "searchScope", "ALL", "HEADERS")
               )
               .map(result -> ResponseEntity.ok()
                   .contentType(MediaType.parseMediaType(result.mediaType()))
@@ -223,7 +247,14 @@ public class MessagesController extends AbstractController implements MessagesAp
     var accessContext = contextBuilder.build();
 
     Flux<TopicMessageEventDTO> messagesFlux;
-    if (cursor != null) {
+    String orderBy = firstQueryParam(exchange, "orderBy");
+    if (orderBy != null) {
+      messagesFlux = messagesService.loadSortedTopicMessages(
+          getCluster(clusterName), topicName, stringFilter, smartFilterId, limit, keySerde, valueSerde,
+          searchOption(exchange, "searchMatch", "ALL", "ANY"),
+          searchOption(exchange, "searchScope", "ALL", "HEADERS"),
+          orderBy, Optional.ofNullable(firstQueryParam(exchange, "sortOrder")).orElse("ASC"));
+    } else if (cursor != null) {
       messagesFlux = messagesService.loadMessages(getCluster(clusterName), topicName, cursor);
     } else {
       var pollingMode = mode == null ? PollingModeDTO.LATEST : mode;
@@ -235,10 +266,15 @@ public class MessagesController extends AbstractController implements MessagesAp
           smartFilterId,
           limit,
           keySerde,
-          valueSerde
+          valueSerde,
+          searchOption(exchange, "searchMatch", "ALL", "ANY"),
+          searchOption(exchange, "searchScope", "ALL", "HEADERS"),
+          timestampTo
       );
     }
-    messagesFlux = messagesService.filterMessagesByTimestampUpperBound(messagesFlux, timestampTo);
+    if (orderBy == null) {
+      messagesFlux = messagesService.filterMessagesByTimestampUpperBound(messagesFlux, timestampTo);
+    }
     return accessControlService.validateAccess(accessContext)
         .then(Mono.just(ResponseEntity.ok(messagesFlux)))
         .doOnEach(sig -> auditService.audit(accessContext, sig));

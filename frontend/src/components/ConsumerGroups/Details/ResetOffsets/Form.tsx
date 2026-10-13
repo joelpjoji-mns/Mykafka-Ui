@@ -12,22 +12,20 @@ import {
   useFieldArray,
   useForm,
 } from 'react-hook-form';
-import { MultiSelect, Option } from 'react-multi-select-component';
+import { Option } from 'react-multi-select-component';
+import MultiSelect from 'components/common/MultiSelect/MultiSelect.styled';
 import 'react-datepicker/dist/react-datepicker.css';
 import { ErrorMessage } from '@hookform/error-message';
 import { InputLabel } from 'components/common/Input/InputLabel.styled';
 import { Button } from 'components/common/Button/Button';
+import { Modal } from 'components/common/Modal';
 import Checkbox from 'components/common/Checkbox/Checkbox';
 import Input from 'components/common/Input/Input';
 import { FormError } from 'components/common/Input/Input.styled';
 import useAppParams from 'lib/hooks/useAppParams';
-import {
-  useCooperativeResetConsumerGroupOffsetsMutation,
-  useResetConsumerGroupOffsetsMutation,
-} from 'lib/hooks/api/consumers';
+import { useResetConsumerGroupOffsetsMutation } from 'lib/hooks/api/consumers';
 import { FlexFieldset, StyledForm } from 'components/common/Form/Form.styled';
 import ControlledSelect from 'components/common/Select/ControlledSelect';
-import { GlobalSettingsContext } from 'components/contexts/GlobalSettingsContext';
 import { useTimezone } from 'lib/hooks/useTimezones';
 
 import * as S from './ResetOffsets.styled';
@@ -44,13 +42,9 @@ const resetTypeOptions = Object.values(ConsumerGroupOffsetsResetType).map(
 
 const Form: React.FC<FormProps> = ({ defaultValues, partitions, topics }) => {
   const navigate = useNavigate();
-  const { hasCooperativeOffsetReset } = React.useContext(GlobalSettingsContext);
   const { getDateInCurrentTimezone } = useTimezone();
   const routerParams = useAppParams<ClusterGroupParam>();
   const reset = useResetConsumerGroupOffsetsMutation(routerParams);
-  const cooperativeReset =
-    useCooperativeResetConsumerGroupOffsetsMutation(routerParams);
-  const [keepGroupStable, setKeepGroupStable] = React.useState(false);
   const topicOptions = React.useMemo(
     () => topics.map((value) => ({ value, label: value })),
     [topics]
@@ -107,14 +101,8 @@ const Form: React.FC<FormProps> = ({ defaultValues, partitions, topics }) => {
   }, [topicValue]);
 
   const onSubmit = async (data: ConsumerGroupOffsetsReset) => {
-    if (keepGroupStable) {
-      await cooperativeReset.mutateAsync({
-        ...data,
-        waitForInactive: undefined,
-      });
-    } else {
-      await reset.mutateAsync(data);
-    }
+    const completed = await reset.mutateAsync(data);
+    if (completed === false) return;
     navigate(-1);
   };
 
@@ -134,31 +122,11 @@ const Form: React.FC<FormProps> = ({ defaultValues, partitions, topics }) => {
             placeholder="Select Reset Type"
             options={resetTypeOptions}
           />
-          {hasCooperativeOffsetReset && (
-            <S.CooperativeOption>
-              <input
-                type="checkbox"
-                checked={keepGroupStable}
-                onChange={({ target: { checked } }) =>
-                  setKeepGroupStable(checked)
-                }
-              />
-              <span>
-                <strong>Keep the consumer group STABLE</strong>
-                <small>
-                  Requires the cooperative reset adapter in every consumer
-                  instance.
-                </small>
-              </span>
-            </S.CooperativeOption>
-          )}
-          {!keepGroupStable && (
-            <Checkbox
-              name="waitForInactive"
-              label="Wait for an active consumer group to become inactive"
-              hint="The reset waits up to 60 seconds and never pauses or removes consumers."
-            />
-          )}
+          <Checkbox
+            name="waitForInactive"
+            label="Wait for an active consumer group to become inactive"
+            hint="Waits until the group is inactive or you cancel. Never pauses or removes consumers."
+          />
           <div>
             <InputLabel>Partitions</InputLabel>
             <MultiSelect
@@ -232,16 +200,36 @@ const Form: React.FC<FormProps> = ({ defaultValues, partitions, topics }) => {
             buttonSize="M"
             buttonType="primary"
             type="submit"
-            disabled={
-              partitionsValue.length === 0 ||
-              reset.isPending ||
-              cooperativeReset.isPending
-            }
+            disabled={partitionsValue.length === 0 || reset.isPending}
           >
-            {keepGroupStable ? 'Reset and keep STABLE' : 'Reset Offsets'}
+            Reset Offsets
           </Button>
         </div>
       </StyledForm>
+      <Modal
+        isOpen={reset.isPending}
+        onClose={() => reset.cancel()}
+        title="Waiting to reset consumer offsets"
+        footer={
+          <Button
+            buttonType="secondary"
+            buttonSize="M"
+            onClick={() => reset.cancel()}
+          >
+            Cancel waiting
+          </Button>
+        }
+      >
+        <p>
+          The reset waits until the consumer group is inactive, with no time
+          limit. You can cancel the pending request. Consumers are never paused
+          or removed.
+        </p>
+        <p>
+          Cancellation stops waiting; it cannot undo offsets already changed if
+          the group became inactive at the same moment.
+        </p>
+      </Modal>
     </FormProvider>
   );
 };

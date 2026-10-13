@@ -22,6 +22,7 @@ export default createGlobalStyle(
       position: relative;
       margin: 0;
       background: ${theme.effects.appBackground};
+      color: ${theme.default.color.normal};
       font-family: 'Inter', sans-serif;
       font-size: 14px;
       font-weight: 400;

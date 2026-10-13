@@ -28,8 +28,9 @@ const FlexboxContainer = styled.div<FlexboxProps>`
   margin: ${(props) => props.margin};
   padding: ${(props) => props.padding};
   flex-grow: ${(props) => props.flexGrow};
+  flex-wrap: ${(props) => props.flexWrap};
   width: ${(props) => props.width};
-  color ${(props) => props.color};
+  color: ${(props) => props.color};
 `;
 
 const Flexbox: React.FC<FlexboxProps> = ({ children, ...rest }) => {

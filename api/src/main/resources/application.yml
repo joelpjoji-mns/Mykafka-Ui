@@ -1,12 +1,9 @@
 auth:
   type: DISABLED
 
-cooperative-offset-reset:
-  enabled: ${KAFBAT_UI_COOPERATIVE_OFFSET_RESET_ENABLED:false}
-  command-topic: ${KAFBAT_UI_COOPERATIVE_OFFSET_RESET_COMMAND_TOPIC:__kui-cooperative-reset-commands}
-  acknowledgement-topic: ${KAFBAT_UI_COOPERATIVE_OFFSET_RESET_ACK_TOPIC:__kui-cooperative-reset-acks}
-  timeout: ${KAFBAT_UI_COOPERATIVE_OFFSET_RESET_TIMEOUT:30s}
-  auto-create-topics: ${KAFBAT_UI_COOPERATIVE_OFFSET_RESET_AUTO_CREATE_TOPICS:false}
+server:
+  netty:
+    max-initial-line-length: 64KB
 
 spring:
   codec:
@@ -45,4 +42,3 @@ logging:
     io.kafbat.ui: ${KAFBAT_UI_LOG_LEVEL:INFO}
     reactor.netty.http.server.AccessLog: INFO
     org.hibernate.validator: WARN
-

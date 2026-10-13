@@ -42,7 +42,6 @@ interface CustomRenderOptions extends Omit<RenderOptions, 'wrapper'> {
   };
   globalSettings?: {
     hasDynamicConfig: boolean;
-    hasCooperativeOffsetReset?: boolean;
   };
 }
 
@@ -125,7 +124,6 @@ const customRender = (
       <GlobalSettingsContext.Provider
         value={{
           hasDynamicConfig: false,
-          hasCooperativeOffsetReset: false,
           ...globalSettings,
         }}
       >

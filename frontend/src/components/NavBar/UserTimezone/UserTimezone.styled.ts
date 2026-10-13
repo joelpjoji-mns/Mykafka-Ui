@@ -18,7 +18,7 @@ export const ContentContainer = styled.div`
 export const InputContainer = styled.div`
   position: sticky;
   top: 0;
-  background-color: white;
+  background-color: ${({ theme }) => theme.default.backgroundColor};
   z-index: 1;
 `;
 

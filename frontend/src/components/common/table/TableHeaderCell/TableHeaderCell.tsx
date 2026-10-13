@@ -39,12 +39,10 @@ const TableHeaderCell: React.FC<PropsWithChildren<TableHeaderCellProps>> = (
     return orderValue && handleOrderBy && handleOrderBy(orderValue);
   };
   const handleOnKeyDown = (event: React.KeyboardEvent) => {
-    return (
-      event.code === 'Space' &&
-      orderValue &&
-      handleOrderBy &&
-      handleOrderBy(orderValue)
-    );
+    if (event.code === 'Space' || event.key === 'Enter') {
+      event.preventDefault();
+      handleOnClick();
+    }
   };
   const handleResizeKeyDown = (
     event: React.KeyboardEvent<HTMLButtonElement>
@@ -77,8 +75,13 @@ const TableHeaderCell: React.FC<PropsWithChildren<TableHeaderCellProps>> = (
     role: 'button',
     tabIndex: 0,
   };
+  const orderedDirection =
+    sortOrder === SortOrder.ASC ? 'ascending' : 'descending';
   return (
-    <S.TableHeaderCell {...restProps}>
+    <S.TableHeaderCell
+      {...restProps}
+      aria-sort={isOrdered ? orderedDirection : undefined}
+    >
       <S.Title isOrdered={isOrdered} {...orderableProps}>
         {title}
       </S.Title>

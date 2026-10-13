@@ -20,7 +20,7 @@ import useAppParams from './useAppParams';
 
 const defaultModeValue = PollingMode.TAILING;
 
-const normalizeMessageLimit = (value: string) => {
+export const normalizeMessageLimit = (value: string) => {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
     return MESSAGES_PER_PAGE;

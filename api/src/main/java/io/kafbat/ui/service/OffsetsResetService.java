@@ -17,7 +17,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeoutException;
 import javax.annotation.Nullable;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +25,6 @@ import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.common.ConsumerGroupState;
 import org.apache.kafka.common.TopicPartition;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
@@ -40,7 +38,6 @@ import reactor.core.publisher.Mono;
 public class OffsetsResetService {
 
   private static final Duration ACTIVE_GROUP_RESET_POLL_INTERVAL = Duration.ofMillis(500);
-  private static final Duration ACTIVE_GROUP_RESET_WAIT_TIMEOUT = Duration.ofSeconds(60);
 
   private final AdminClientService adminClientService;
 
@@ -223,15 +220,11 @@ public class OffsetsResetService {
 
   private Mono<Void> waitForGroupToBecomeInactive(
       ReactiveAdminClient adminClient, String groupId) {
-    return Flux.interval(Duration.ZERO, ACTIVE_GROUP_RESET_POLL_INTERVAL)
-        .concatMap(ignored -> describeExistingConsumerGroup(adminClient, groupId))
+    return Mono.defer(() -> describeExistingConsumerGroup(adminClient, groupId))
+        .repeatWhen(completed -> completed.delayElements(ACTIVE_GROUP_RESET_POLL_INTERVAL))
         .filter(group -> isInactive(group.state()))
         .next()
-        .then()
-        .timeout(ACTIVE_GROUP_RESET_WAIT_TIMEOUT)
-        .onErrorMap(TimeoutException.class, exception -> new ValidationException(
-            "Consumer group remained active for %d seconds. Its offsets were not changed."
-                .formatted(ACTIVE_GROUP_RESET_WAIT_TIMEOUT.toSeconds())));
+        .then();
   }
 
   private boolean isInactive(ConsumerGroupState state) {

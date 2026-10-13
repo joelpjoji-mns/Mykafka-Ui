@@ -11,14 +11,12 @@ import {
 } from 'generated-sources';
 import { useTopicConsumerGroups } from 'lib/hooks/api/topics';
 import {
-  useCooperativeResetConsumerGroupOffsetsMutation,
   useConsumerGroupOffsetsResetPreview,
   useResetConsumerGroupOffsetsMutation,
 } from 'lib/hooks/api/consumers';
 import useAppParams from 'lib/hooks/useAppParams';
 
 const mutateAsync = jest.fn();
-const cooperativeMutateAsync = jest.fn();
 const onClose = jest.fn();
 
 jest.mock('lib/hooks/api/topics', () => ({
@@ -26,7 +24,6 @@ jest.mock('lib/hooks/api/topics', () => ({
 }));
 
 jest.mock('lib/hooks/api/consumers', () => ({
-  useCooperativeResetConsumerGroupOffsetsMutation: jest.fn(),
   useConsumerGroupOffsetsResetPreview: jest.fn(),
   useResetConsumerGroupOffsetsMutation: jest.fn(),
 }));
@@ -46,11 +43,6 @@ const message: TopicMessage = {
 describe('MessageResetOffsetsModal', () => {
   beforeEach(() => {
     mutateAsync.mockReset().mockResolvedValue(undefined);
-    cooperativeMutateAsync.mockReset().mockResolvedValue({
-      requestId: 'request-1',
-      groupState: 'STABLE',
-      partitions: [],
-    });
     onClose.mockReset();
     (useAppParams as jest.Mock).mockReturnValue({
       clusterName: 'test-cluster',
@@ -64,12 +56,6 @@ describe('MessageResetOffsetsModal', () => {
     });
     (useResetConsumerGroupOffsetsMutation as jest.Mock).mockReturnValue({
       mutateAsync,
-      isPending: false,
-    });
-    (
-      useCooperativeResetConsumerGroupOffsetsMutation as jest.Mock
-    ).mockReturnValue({
-      mutateAsync: cooperativeMutateAsync,
       isPending: false,
     });
     (useConsumerGroupOffsetsResetPreview as jest.Mock).mockReturnValue({
@@ -208,43 +194,7 @@ describe('MessageResetOffsetsModal', () => {
     });
   });
 
-  it('uses cooperative reset when keeping the consumer group stable', async () => {
-    render(<MessageResetOffsetsModal message={message} onClose={onClose} />, {
-      globalSettings: {
-        hasDynamicConfig: false,
-        hasCooperativeOffsetReset: true,
-      },
-    });
-
-    await selectConsumerGroup('orders-primary');
-    await userEvent.click(
-      screen.getByRole('checkbox', {
-        name: /Keep the consumer group STABLE/,
-      })
-    );
-
-    expect(
-      screen.queryByRole('checkbox', {
-        name: /Wait for an active consumer group to become inactive/,
-      })
-    ).not.toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Reset and keep STABLE' })
-    );
-
-    await waitFor(() => {
-      expect(cooperativeMutateAsync).toHaveBeenCalledWith({
-        topic: 'orders',
-        resetType: ConsumerGroupOffsetsResetType.OFFSET,
-        partitions: [3],
-        partitionsOffsets: [{ partition: 3, offset: 42 }],
-      });
-    });
-    expect(mutateAsync).not.toHaveBeenCalled();
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it('hides stable mode when cooperative reset is disabled', async () => {
+  it('does not offer the topic-based stable mode', async () => {
     render(<MessageResetOffsetsModal message={message} onClose={onClose} />);
 
     await selectConsumerGroup('orders-primary');

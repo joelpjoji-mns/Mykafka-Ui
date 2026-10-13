@@ -1,13 +1,9 @@
 import React from 'react';
 import { screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { render } from 'lib/testHelpers';
 import { ConsumerGroupOffsetsResetType } from 'generated-sources';
 import useAppParams from 'lib/hooks/useAppParams';
-import {
-  useCooperativeResetConsumerGroupOffsetsMutation,
-  useResetConsumerGroupOffsetsMutation,
-} from 'lib/hooks/api/consumers';
+import { useResetConsumerGroupOffsetsMutation } from 'lib/hooks/api/consumers';
 import Form from 'components/ConsumerGroups/Details/ResetOffsets/Form';
 
 jest.mock('lib/hooks/useAppParams', () => ({
@@ -16,7 +12,6 @@ jest.mock('lib/hooks/useAppParams', () => ({
 }));
 
 jest.mock('lib/hooks/api/consumers', () => ({
-  useCooperativeResetConsumerGroupOffsetsMutation: jest.fn(),
   useResetConsumerGroupOffsetsMutation: jest.fn(),
 }));
 
@@ -36,15 +31,9 @@ describe('ResetOffsets Form', () => {
       mutateAsync: jest.fn(),
       isPending: false,
     });
-    (
-      useCooperativeResetConsumerGroupOffsetsMutation as jest.Mock
-    ).mockReturnValue({
-      mutateAsync: jest.fn(),
-      isPending: false,
-    });
   });
 
-  it('makes stable mode mutually exclusive with waiting for inactivity', async () => {
+  it('retains waiting for inactivity without the topic-based stable mode', () => {
     render(
       <Form
         defaultValues={{
@@ -61,13 +50,7 @@ describe('ResetOffsets Form', () => {
             partition: 0,
           },
         ]}
-      />,
-      {
-        globalSettings: {
-          hasDynamicConfig: false,
-          hasCooperativeOffsetReset: true,
-        },
-      }
+      />
     );
 
     expect(
@@ -75,24 +58,24 @@ describe('ResetOffsets Form', () => {
         name: /Wait for an active consumer group to become inactive/,
       })
     ).toBeInTheDocument();
-
-    await userEvent.click(
-      screen.getByRole('checkbox', {
-        name: /Keep the consumer group STABLE/,
-      })
-    );
 
     expect(
       screen.queryByRole('checkbox', {
-        name: /Wait for an active consumer group to become inactive/,
+        name: /Keep the consumer group STABLE/,
       })
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Reset and keep STABLE' })
+      screen.getByRole('button', { name: 'Reset Offsets' })
     ).toBeInTheDocument();
   });
 
-  it('hides stable mode when cooperative reset is disabled', () => {
+  it('allows cancelling the pending inactive-group wait', () => {
+    const cancel = jest.fn();
+    (useResetConsumerGroupOffsetsMutation as jest.Mock).mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: true,
+      cancel,
+    });
     render(
       <Form
         defaultValues={{
@@ -107,10 +90,8 @@ describe('ResetOffsets Form', () => {
       />
     );
 
-    expect(
-      screen.queryByRole('checkbox', {
-        name: /Keep the consumer group STABLE/,
-      })
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toHaveTextContent('no time limit');
+    screen.getByRole('button', { name: 'Cancel waiting' }).click();
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 });

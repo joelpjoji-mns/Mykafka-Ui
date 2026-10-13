@@ -72,6 +72,43 @@ class MessagesServiceTest extends AbstractIntegrationTest {
   }
 
   @Test
+  void wholeTopicSortingFindsExtremesBeyondTheRequestedPageAndAcrossPartitions() {
+    String topic = "whole-topic-sort-" + UUID.randomUUID();
+    createTopicWithCleanup(new NewTopic(topic, 2, (short) 1));
+    try (var producer = KafkaTestProducer.forKafka(kafka)) {
+      for (int index = 0; index < 1_100; index++) {
+        producer.send(new ProducerRecord<>(topic, index % 2, "key", "middle-" + index));
+      }
+    }
+    messagesService.sendMessage(cluster, topic, new CreateTopicMessageDTO()
+        .partition(1).key("key").value("z".repeat(2_000))
+        .keySerde(StringSerde.NAME).valueSerde(StringSerde.NAME)).block();
+    var sorted = messagesService.loadSortedTopicMessages(cluster, topic, List.of(), null, 1,
+        StringSerde.NAME, StringSerde.NAME, false, false, "size", "DESC")
+        .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
+        .map(TopicMessageEventDTO::getMessage).collectList().block(Duration.ofSeconds(30));
+    assertThat(sorted).hasSize(1);
+    assertThat(sorted.getFirst().getPartition()).isEqualTo(1);
+    assertThat(sorted.getFirst().getValue()).isEqualTo("z".repeat(2_000));
+    messagesService.sendMessage(cluster, topic, new CreateTopicMessageDTO()
+        .partition(0).key("key").value("a")
+        .keySerde(StringSerde.NAME).valueSerde(StringSerde.NAME)).block();
+    var smallest = messagesService.loadSortedTopicMessages(cluster, topic, List.of(), null, 1,
+        StringSerde.NAME, StringSerde.NAME, false, false, "size", "ASC")
+        .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
+        .map(TopicMessageEventDTO::getMessage).collectList().block(Duration.ofSeconds(30));
+    assertThat(smallest).hasSize(1);
+    assertThat(smallest.getFirst().getValue()).isEqualTo("a");
+    var filtered = messagesService.loadSortedTopicMessages(cluster, topic, List.of("middle-"), null, 1,
+        StringSerde.NAME, StringSerde.NAME, false, false, "offset", "DESC")
+        .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
+        .map(TopicMessageEventDTO::getMessage).collectList().block(Duration.ofSeconds(30));
+    assertThat(filtered).hasSize(1);
+    assertThat(filtered.getFirst().getOffset()).isEqualTo(549L);
+    assertThat(filtered.getFirst().getValue()).startsWith("middle-");
+  }
+
+  @Test
   void deleteTopicMessagesReturnsExceptionWhenTopicNotFound() {
     StepVerifier.create(messagesService.deleteTopicMessages(cluster, NON_EXISTING_TOPIC, List.of()))
         .expectError(TopicNotFoundException.class)
@@ -227,7 +264,7 @@ class MessagesServiceTest extends AbstractIntegrationTest {
 
   @Test
   void downloadLimitUsesTheNewDefaultAndMaximum() {
-    assertThat(messagesService.resolveDownloadLimit(null)).isEqualTo(500);
+    assertThat(messagesService.resolveDownloadLimit(null)).isEqualTo(5_000);
     assertThat(messagesService.resolveDownloadLimit(5_000)).isEqualTo(5_000);
     assertThatThrownBy(() -> messagesService.resolveDownloadLimit(5_001))
         .isInstanceOf(ValidationException.class)
@@ -267,6 +304,67 @@ class MessagesServiceTest extends AbstractIntegrationTest {
     String content = new String(result.content(), StandardCharsets.UTF_8);
     assertThat(content).contains("payment complete");
     assertThat(content).doesNotContain("payment pending").doesNotContain("invoice complete");
+  }
+
+  @Test
+  void downloadTimeWindowFiltersBeforeApplyingTheResultLimit() throws Exception {
+    String topic = "search-window-" + UUID.randomUUID();
+    createTopicWithCleanup(new NewTopic(topic, 1, (short) 1));
+    long timestamp = System.currentTimeMillis();
+    try (var producer = KafkaTestProducer.forKafka(kafka)) {
+      producer.send(new ProducerRecord<>(topic, 0, timestamp + 1000, "key", "outside-window"));
+      producer.send(new ProducerRecord<>(topic, 0, timestamp, "key", "inside-window")).get();
+    }
+    var result = messagesService.downloadMessages(
+        cluster, topic, 1, List.of(), List.of(), null,
+        StringSerde.NAME, StringSerde.NAME, PollingModeDTO.EARLIEST,
+        null, null, timestamp, DownloadFormat.NDJSON).block(Duration.ofSeconds(10));
+    assertThat(result).isNotNull();
+    String content = new String(result.content(), StandardCharsets.UTF_8);
+    assertThat(content.lines().count()).isEqualTo(1);
+    assertThat(content).contains("inside-window").doesNotContain("outside-window");
+  }
+
+  @Test
+  void downloadsTheUnionOfHeaderMatchesWithoutDuplicateMessages() throws Exception {
+    String topic = "search-union-" + UUID.randomUUID();
+    createTopicWithCleanup(new NewTopic(topic, 1, (short) 1));
+    try (var producer = KafkaTestProducer.forKafka(kafka)) {
+      var first = new ProducerRecord<String, String>(topic, "first");
+      first.headers().add("trace", "request".getBytes(StandardCharsets.UTF_8));
+      producer.send(first);
+      var second = new ProducerRecord<String, String>(topic, "second");
+      second.headers().add("request", "other".getBytes(StandardCharsets.UTF_8));
+      producer.send(second);
+      producer.send(topic, "trace request payload only").get();
+    }
+    var result = messagesService.downloadMessages(
+        cluster, topic, 10, List.of(), List.of("trace", "request"), null,
+        StringSerde.NAME, StringSerde.NAME, PollingModeDTO.EARLIEST,
+        null, null, null, DownloadFormat.NDJSON, true, true).block();
+    assertThat(result).isNotNull();
+    String content = new String(result.content(), StandardCharsets.UTF_8);
+    assertThat(content.lines().count()).isEqualTo(2);
+    assertThat(content).contains("first", "second").doesNotContain("payload only");
+  }
+
+  @Test
+  void deliversFiveHundredLiveSnapshotMatchesWithoutTheOldTwentyPerSecondThrottle() throws Exception {
+    String topic = "live-speed-" + UUID.randomUUID();
+    createTopicWithCleanup(new NewTopic(topic, 1, (short) 1));
+    try (var producer = KafkaTestProducer.forKafka(kafka)) {
+      for (int index = 0; index < 500; index++) {
+        producer.send(topic, "match-" + index);
+      }
+    }
+    var messages = messagesService.loadMessages(
+        cluster, topic, ConsumerPosition.create(PollingModeDTO.TAILING, topic, List.of(), null, null),
+        List.of("match"), null, 500, StringSerde.NAME, StringSerde.NAME)
+        .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
+        .take(500)
+        .collectList()
+        .block(Duration.ofSeconds(5));
+    assertThat(messages).hasSize(500);
   }
 
   @Test

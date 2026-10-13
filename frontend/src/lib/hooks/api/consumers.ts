@@ -1,7 +1,4 @@
-import {
-  consumerGroupsApiClient as api,
-  cooperativeConsumerGroupsApiClient as cooperativeApi,
-} from 'lib/api';
+import { consumerGroupsApiClient as api } from 'lib/api';
 import {
   useMutation,
   useQuery,
@@ -10,7 +7,6 @@ import {
 } from '@tanstack/react-query';
 import { ClusterName } from 'lib/interfaces/cluster';
 import {
-  CooperativeConsumerGroupOffsetsResetResponse,
   ConsumerGroup,
   ConsumerGroupDetails,
   ConsumerGroupLag,
@@ -122,14 +118,35 @@ export const useResetConsumerGroupOffsetsMutation = ({
   consumerGroupID,
 }: UseConsumerGroupDetailsProps) => {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (props: ConsumerGroupOffsetsReset) =>
-      api.resetConsumerGroupOffsets({
-        clusterName,
-        id: consumerGroupID,
-        consumerGroupOffsetsReset: props,
-      }),
-    onSuccess: () => {
+  const controller = useRef<AbortController | undefined>(undefined);
+  useEffect(
+    () => () => controller.current?.abort(),
+    [clusterName, consumerGroupID]
+  );
+  const mutation = useMutation({
+    mutationFn: async (props: ConsumerGroupOffsetsReset) => {
+      controller.current?.abort();
+      const request = new AbortController();
+      controller.current = request;
+      try {
+        await api.resetConsumerGroupOffsets(
+          {
+            clusterName,
+            id: consumerGroupID,
+            consumerGroupOffsetsReset: props,
+          },
+          { signal: request.signal }
+        );
+        return !request.signal.aborted;
+      } catch (error) {
+        if (request.signal.aborted) return false;
+        throw error;
+      } finally {
+        if (controller.current === request) controller.current = undefined;
+      }
+    },
+    onSuccess: (completed) => {
+      if (!completed) return;
       showSuccessAlert({
         message: `Consumer ${consumerGroupID} group offsets reset`,
       });
@@ -138,35 +155,7 @@ export const useResetConsumerGroupOffsetsMutation = ({
       });
     },
   });
-};
-
-export const useCooperativeResetConsumerGroupOffsetsMutation = ({
-  clusterName,
-  consumerGroupID,
-}: UseConsumerGroupDetailsProps) => {
-  const queryClient = useQueryClient();
-  return useMutation<
-    CooperativeConsumerGroupOffsetsResetResponse,
-    ServerResponse,
-    ConsumerGroupOffsetsReset
-  >({
-    mutationFn: (props) =>
-      apiFetch(() =>
-        cooperativeApi.cooperativeResetConsumerGroupOffsets({
-          clusterName,
-          id: consumerGroupID,
-          consumerGroupOffsetsReset: props,
-        })
-      ),
-    onSuccess: (response) => {
-      showSuccessAlert({
-        message: `Consumer ${consumerGroupID} offsets reset while group remained ${response.groupState}`,
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['clusters', clusterName, 'consumerGroups'],
-      });
-    },
-  });
+  return { ...mutation, cancel: () => controller.current?.abort() };
 };
 
 type UseConsumerGroupOffsetsResetPreviewProps = UseConsumerGroupDetailsProps & {

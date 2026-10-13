@@ -15,6 +15,7 @@ import {
   clusterTopicDownloadRelativePath,
   clusterTopicEditRelativePath,
   clusterTopicMessagesRelativePath,
+  clusterTopicSearchRelativePath,
   clusterTopicPath,
   clusterTopicSettingsRelativePath,
   clusterTopicsPath,
@@ -247,6 +248,17 @@ const Topic: React.FC = () => {
               Messages
             </ActionNavLink>
             <ActionNavLink
+              to={`${topicPath}/${clusterTopicSearchRelativePath}`}
+              className={({ isActive }) => (isActive ? 'is-active' : '')}
+              permission={{
+                resource: ResourceType.TOPIC,
+                action: Action.MESSAGES_READ,
+                value: topicName,
+              }}
+            >
+              Search
+            </ActionNavLink>
+            <ActionNavLink
               to={`${topicPath}/${clusterTopicDownloadRelativePath}`}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               permission={{
@@ -348,6 +360,10 @@ const Topic: React.FC = () => {
                 <Route
                   path={clusterTopicDownloadRelativePath}
                   element={<Download />}
+                />
+                <Route
+                  path={clusterTopicSearchRelativePath}
+                  element={<Messages searchPage />}
                 />
                 <Route
                   path={clusterTopicUploadRelativePath}

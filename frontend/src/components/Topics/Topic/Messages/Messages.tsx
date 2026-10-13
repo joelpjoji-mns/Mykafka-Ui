@@ -5,11 +5,17 @@ import useAppParams from 'lib/hooks/useAppParams';
 import { RouteParamsClusterTopic } from 'lib/paths';
 import { MessagesFilterKeys } from 'lib/constants';
 import { saveMessageViewFilterSnapshot } from 'lib/messageViewFilterSnapshot';
+import PageLoader from 'components/common/PageLoader/PageLoader';
 
 import MessagesTable from './MessagesTable';
 import Filters from './Filters/Filters';
+import SearchControls, { getSearchQueryKey } from './SearchControls';
 
-const Messages: React.FC = () => {
+const MessageResults: React.FC<{
+  searchPage?: boolean;
+  enabled?: boolean;
+  pending?: boolean;
+}> = ({ searchPage = false, enabled = true, pending = false }) => {
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
   const [searchParams, setSearchParams] = useSearchParams();
   const stringFilters = React.useMemo(() => {
@@ -62,24 +68,89 @@ const Messages: React.FC = () => {
     clusterName,
     topicName,
     stringFilters,
+    enabled,
   });
+
+  const filters = (
+    <Filters
+      consumptionStats={consumptionStats}
+      isFetching={pending || isFetching}
+      phaseMessage={phase}
+      abortFetchData={abortFetchData}
+      stringFilters={stringFilters}
+      setStringFilter={setStringFilter}
+      hideSearch={searchPage}
+    />
+  );
 
   return (
     <>
-      <Filters
-        consumptionStats={consumptionStats}
-        isFetching={isFetching}
-        phaseMessage={phase}
-        abortFetchData={abortFetchData}
-        stringFilters={stringFilters}
-        setStringFilter={setStringFilter}
-      />
+      {searchPage ? (
+        <details style={{ margin: '12px 16px' }}>
+          <summary>Advanced filters</summary>
+          {filters}
+        </details>
+      ) : (
+        filters
+      )}
       <MessagesTable
         messages={messages}
-        isFetching={isFetching}
+        isFetching={pending || isFetching}
         animateLiveArrivals={isLiveStreamReady}
+        abortFetchData={abortFetchData}
+        consumptionStats={consumptionStats}
       />
     </>
+  );
+};
+
+const SearchPage: React.FC = () => {
+  const [queryKey, setQueryKey] = React.useState<string | null>(null);
+  const [hasStarted, setHasStarted] = React.useState(false);
+  const [hasResults, setHasResults] = React.useState(false);
+  const [pending, setPending] = React.useState(false);
+  const onSearch = React.useCallback((key: string | null, updating = false) => {
+    setQueryKey(key);
+    setPending(updating);
+    if (key !== null) setHasStarted(true);
+  }, []);
+  const [params] = useSearchParams();
+  const hasSearched =
+    queryKey !== null && queryKey === getSearchQueryKey(params);
+  const updating = pending || (queryKey !== null && !hasSearched);
+  React.useEffect(() => {
+    if (hasSearched) setHasResults(true);
+  }, [hasSearched]);
+  return (
+    <>
+      <SearchControls
+        hasSearched={hasStarted}
+        resultsAvailable={hasSearched}
+        onSearch={onSearch}
+      />
+      {(hasSearched || hasResults) && (
+        <div hidden={!hasSearched && !updating}>
+          <MessageResults searchPage enabled={hasSearched} pending={updating} />
+        </div>
+      )}
+      {!hasSearched && !hasResults && updating && <PageLoader />}
+      {!hasSearched && !updating && (
+        <p style={{ padding: '24px 16px', textAlign: 'center' }}>
+          Enter search terms above. Matching messages appear automatically.
+        </p>
+      )}
+    </>
+  );
+};
+
+const Messages: React.FC<{ searchPage?: boolean }> = ({
+  searchPage = false,
+}) => {
+  const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
+  return searchPage ? (
+    <SearchPage key={`${clusterName}/${topicName}`} />
+  ) : (
+    <MessageResults />
   );
 };
 

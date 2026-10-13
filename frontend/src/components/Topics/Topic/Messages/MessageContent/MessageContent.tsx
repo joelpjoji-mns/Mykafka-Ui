@@ -16,6 +16,7 @@ import Serde from './components/Serde/Serde';
 type Tab = 'key' | 'content' | 'headers';
 
 export interface MessageContentProps {
+  searchTerms?: string[];
   messageKey?: string;
   messageContent?: string;
   headers?: { [key: string]: string | undefined };
@@ -49,6 +50,7 @@ const MessageContent: React.FC<MessageContentProps> = ({
   valueDeserializeProperties,
   valueSerde,
   actions,
+  searchTerms,
 }) => {
   const { currentTimezone } = useTimezone();
 
@@ -136,6 +138,7 @@ const MessageContent: React.FC<MessageContentProps> = ({
               data={activeTabContent() || ''}
               maxLines={28}
               schemaType={contentType}
+              searchTerms={searchTerms}
             />
           </S.ContentBox>
           <S.MetadataWrapper>

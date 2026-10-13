@@ -19,7 +19,7 @@ export const BackLink = styled(NavLink)`
   position: relative;
 
   &:hover {
-    ${({ theme }) => theme.pageHeading.backLink.color.hover};
+    color: ${({ theme }) => theme.pageHeading.backLink.color.hover};
   }
 
   &::after {
@@ -57,6 +57,7 @@ export const Content = styled.div`
   & > ${Breadcrumbs} {
     flex: 1 1 240px;
     gap: 20px;
+    justify-content: flex-start;
   }
 
   @media screen and (max-width: ${({ theme }) => theme.breakpoints.S}px) {

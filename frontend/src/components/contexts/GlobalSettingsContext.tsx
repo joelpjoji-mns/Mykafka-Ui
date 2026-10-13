@@ -5,13 +5,11 @@ import { useNavigate } from 'react-router-dom';
 
 interface GlobalSettingsContextProps {
   hasDynamicConfig: boolean;
-  hasCooperativeOffsetReset: boolean;
 }
 
 export const GlobalSettingsContext =
   React.createContext<GlobalSettingsContextProps>({
     hasDynamicConfig: false,
-    hasCooperativeOffsetReset: false,
   });
 
 export const GlobalSettingsProvider: React.FC<
@@ -21,7 +19,6 @@ export const GlobalSettingsProvider: React.FC<
   const navigate = useNavigate();
   const [value, setValue] = React.useState<GlobalSettingsContextProps>({
     hasDynamicConfig: false,
-    hasCooperativeOffsetReset: false,
   });
 
   React.useEffect(() => {
@@ -36,9 +33,6 @@ export const GlobalSettingsProvider: React.FC<
       setValue({
         hasDynamicConfig: features.includes(
           ApplicationInfoEnabledFeaturesEnum.DYNAMIC_CONFIG
-        ),
-        hasCooperativeOffsetReset: features.includes(
-          ApplicationInfoEnabledFeaturesEnum.COOPERATIVE_OFFSET_RESET
         ),
       });
     }

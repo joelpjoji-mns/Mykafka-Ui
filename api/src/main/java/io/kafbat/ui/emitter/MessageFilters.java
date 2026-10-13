@@ -93,8 +93,35 @@ public class MessageFilters {
         filter = filter.and(containsStringFilter(stringFilter));
       }
     }
-
     return filter;
+  }
+
+  public static Predicate<TopicMessageDTO> search(
+      @Nullable List<String> strings, boolean matchAny, boolean headersOnly) {
+    if (strings == null) {
+      return noop();
+    }
+    var terms = strings.stream().filter(Objects::nonNull).filter(term -> !term.isEmpty()).toList();
+    if (terms.isEmpty()) {
+      return noop();
+    }
+    List<Predicate<TopicMessageDTO>> filters = terms.stream()
+        .map(term -> headersOnly
+            ? containsStringFilterForHeaders(term)
+            : containsStringFilter(term))
+        .toList();
+    return message -> matchAny
+        ? filters.stream().anyMatch(filter -> filter.test(message))
+        : filters.stream().allMatch(filter -> filter.test(message));
+  }
+
+  private static Predicate<TopicMessageDTO> containsStringFilterForHeaders(String term) {
+    String escaped = escapeNonAscii(term);
+    String escapedLower = escaped == null ? null
+        : HEX_IN_UNICODE_ESCAPE.matcher(escaped).replaceAll(match -> match.group().toLowerCase());
+    return message -> headersContains(message, term)
+        || (escaped != null && headersContains(message, escaped))
+        || (escapedLower != null && headersContains(message, escapedLower));
   }
 
   private static boolean headersContains(TopicMessageDTO msg, String searchString) {

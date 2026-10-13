@@ -7,7 +7,6 @@ import com.google.common.base.Charsets;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.hash.Hashing;
-import com.google.common.util.concurrent.RateLimiter;
 import io.kafbat.ui.config.ClustersProperties;
 import io.kafbat.ui.emitter.BackwardEmitter;
 import io.kafbat.ui.emitter.Cursor;
@@ -42,17 +41,19 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
-import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -83,14 +84,12 @@ public class MessagesService {
   private static final long SALT_FOR_HASHING = ThreadLocalRandom.current().nextLong();
 
   private static final int DEFAULT_MAX_PAGE_SIZE = 5_000;
-  private static final int DEFAULT_PAGE_SIZE = 500;
+  private static final int DEFAULT_PAGE_SIZE = 1_000;
   private static final int DEFAULT_UPLOAD_MESSAGE_LIMIT = 1_000;
   private static final int MAX_UPLOAD_MESSAGE_LIMIT = 10_000;
   private static final int MAX_PRODUCER_REQUEST_BYTES = 16 * 1024 * 1024;
   private static final long MAX_PRODUCER_BUFFER_BYTES = 64L * 1024 * 1024;
 
-  // limiting UI messages rate to 20/sec in tailing mode
-  private static final int TAILING_UI_MESSAGE_THROTTLE_RATE = 20;
   private static final String INVALID_ZIP_ENTRY_CHARS = "[\\\\/:*?\"<>|\\p{Cntrl}]";
 
   private final AdminClientService adminClientService;
@@ -98,6 +97,7 @@ public class MessagesService {
   private final ConsumerGroupService consumerGroupService;
   private final int maxPageSize;
   private final int defaultPageSize;
+  private final int defaultDownloadLimit;
 
   private final Cache<String, Predicate<TopicMessageDTO>> registeredFilters =
       CacheBuilder.newBuilder().maximumSize(PollingCursorsStorage.MAX_SIZE).build();
@@ -120,6 +120,11 @@ public class MessagesService {
         Optional.ofNullable(pollingProps.getMaxPageSize()).orElse(DEFAULT_MAX_PAGE_SIZE);
     this.defaultPageSize =
         Optional.ofNullable(pollingProps.getDefaultPageSize()).orElse(DEFAULT_PAGE_SIZE);
+    this.defaultDownloadLimit = Math.min(
+        Optional.ofNullable(pollingProps.getDefaultDownloadLimit()).orElse(5_000), maxPageSize);
+    if (maxPageSize < 1 || defaultPageSize < 1 || defaultDownloadLimit < 1) {
+      throw new IllegalArgumentException("Kafka polling page sizes and download limit must be positive");
+    }
   }
 
   public enum DownloadFormat {
@@ -578,12 +583,34 @@ public class MessagesService {
       @Nullable Integer limit,
       @Nullable String keySerde,
       @Nullable String valueSerde) {
+    return loadMessages(cluster, topic, consumerPosition, containsStringFilters, filterId,
+        limit, keySerde, valueSerde, false, false);
+  }
+
+  public Flux<TopicMessageEventDTO> loadMessages(
+      KafkaCluster cluster, String topic, ConsumerPosition consumerPosition,
+      @Nullable List<String> containsStringFilters, @Nullable String filterId,
+      @Nullable Integer limit, @Nullable String keySerde, @Nullable String valueSerde,
+      boolean matchAny, boolean headersOnly) {
+    return loadMessages(cluster, topic, consumerPosition, containsStringFilters, filterId,
+        limit, keySerde, valueSerde, matchAny, headersOnly, null);
+  }
+
+  public Flux<TopicMessageEventDTO> loadMessages(
+      KafkaCluster cluster, String topic, ConsumerPosition consumerPosition,
+      @Nullable List<String> containsStringFilters, @Nullable String filterId,
+      @Nullable Integer limit, @Nullable String keySerde, @Nullable String valueSerde,
+      boolean matchAny, boolean headersOnly, @Nullable Long timestampTo) {
+    Predicate<TopicMessageDTO> filter = getMsgFilter(containsStringFilters, filterId, matchAny, headersOnly);
+    if (timestampTo != null) {
+      filter = filter.and(message -> matchesTimestampUpperBound(message, timestampTo));
+    }
     return loadMessages(
         cluster,
         topic,
         deserializationService.deserializerFor(cluster, topic, keySerde, valueSerde),
         consumerPosition,
-        getMsgFilter(containsStringFilters, filterId),
+        filter,
         fixPageSize(limit));
   }
 
@@ -603,6 +630,83 @@ public class MessagesService {
         cursor.consumerPosition(),
         cursor.filter(),
         fixPageSize(cursor.limit()));
+  }
+
+  public Flux<TopicMessageEventDTO> loadSortedTopicMessages(
+      KafkaCluster cluster, String topic, @Nullable List<String> stringFilters,
+      @Nullable String filterId, @Nullable Integer limit, @Nullable String keySerde,
+      @Nullable String valueSerde, boolean matchAny, boolean headersOnly,
+      String orderBy, String sortOrder) {
+    Comparator<TopicMessageDTO> order = topicMessageOrder(orderBy, sortOrder);
+    int resultLimit = fixPageSize(limit);
+    return withExistingTopic(cluster, topic).flux()
+        .publishOn(Schedulers.boundedElastic())
+        .flatMap(ignored -> Flux.defer(() -> {
+          var top = new PriorityQueue<TopicMessageDTO>(resultLimit, order.reversed());
+          var done = new AtomicReference<TopicMessageEventDTO>();
+          var position = ConsumerPosition.create(PollingModeDTO.EARLIEST, topic, List.of(), null, null);
+          var deserializer = deserializationService.deserializerFor(cluster, topic, keySerde, valueSerde);
+          var filter = getMsgFilter(stringFilters, filterId, matchAny, headersOnly);
+          var emitter = ForwardEmitter.fullScan(
+              () -> consumerGroupService.createConsumer(
+                  cluster, Map.of(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1_000)),
+              position, 1_000, deserializer, filter, cluster.getPollingSettings(),
+              cursorsStorage.createNewCursor(deserializer, position, filter, resultLimit));
+          Flux<TopicMessageEventDTO> progress = Flux.<TopicMessageEventDTO>create(emitter)
+              .handle((event, sink) -> {
+                if (event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE) {
+                  var message = event.getMessage();
+                  if (top.size() < resultLimit) {
+                    top.add(message);
+                  } else if (order.compare(message, top.peek()) < 0) {
+                    top.poll();
+                    top.add(message);
+                  }
+                } else if (event.getType() == TopicMessageEventDTO.TypeEnum.DONE) {
+                  done.set(event);
+                } else {
+                  sink.next(event);
+                }
+              });
+          return progress.concatWith(Flux.defer(() -> {
+            var finish = done.get();
+            if (finish == null || finish.getConsuming().getFilterApplyErrors() > 0) {
+              return Flux.error(new ValidationException("Whole-topic scan did not complete successfully"));
+            }
+            return Flux.fromStream(top.stream().sorted(order))
+                .map(message -> new TopicMessageEventDTO()
+                    .type(TopicMessageEventDTO.TypeEnum.MESSAGE).message(message))
+                .concatWithValues(finish);
+          }));
+        }));
+  }
+
+  static Comparator<TopicMessageDTO> topicMessageOrder(String column, String direction) {
+    Comparator<TopicMessageDTO> order = switch (column) {
+      case "id" -> Comparator.comparingInt(TopicMessageDTO::getPartition)
+          .thenComparingLong(TopicMessageDTO::getOffset);
+      case "offset" -> Comparator.comparingLong(TopicMessageDTO::getOffset);
+      case "partition" -> Comparator.comparingInt(TopicMessageDTO::getPartition);
+      case "timestamp" -> Comparator.comparing(TopicMessageDTO::getTimestamp,
+          Comparator.nullsFirst(Comparator.naturalOrder()));
+      case "size" -> Comparator.comparingLong(message ->
+          Optional.ofNullable(message.getKeySize()).orElse(0L)
+              + Optional.ofNullable(message.getValueSize()).orElse(0L)
+              + Optional.ofNullable(message.getHeadersSize()).orElse(0L));
+      case "key" -> Comparator.comparing(TopicMessageDTO::getKey,
+          Comparator.nullsFirst(Comparator.naturalOrder()));
+      case "value" -> Comparator.comparing(TopicMessageDTO::getValue,
+          Comparator.nullsFirst(Comparator.naturalOrder()));
+      case "headers" -> Comparator.comparing(message ->
+          OBJECT_MAPPER.valueToTree(Optional.ofNullable(message.getHeaders()).orElse(Map.of())).toString());
+      default -> throw new ValidationException("Unsupported sorting column: " + column);
+    };
+    order = order.thenComparingInt(TopicMessageDTO::getPartition).thenComparingLong(TopicMessageDTO::getOffset);
+    return switch (direction) {
+      case "ASC" -> order;
+      case "DESC" -> order.reversed();
+      default -> throw new ValidationException("Unsupported sort order: " + direction);
+    };
   }
 
   private Flux<TopicMessageEventDTO> loadMessages(
@@ -703,6 +807,17 @@ public class MessagesService {
       @Nullable Long timestamp,
       @Nullable Long timestampTo,
       DownloadFormat format) {
+    return downloadMessages(cluster, topic, limit, partitions, containsStringFilters,
+        smartFilterId, keySerde, valueSerde, pollingMode, offset, timestamp, timestampTo,
+        format, false, false);
+  }
+
+  public Mono<DownloadResult> downloadMessages(
+      KafkaCluster cluster, String topic, int limit, List<Integer> partitions,
+      @Nullable List<String> containsStringFilters, @Nullable String smartFilterId,
+      @Nullable String keySerde, @Nullable String valueSerde, PollingModeDTO pollingMode,
+      @Nullable Long offset, @Nullable Long timestamp, @Nullable Long timestampTo,
+      DownloadFormat format, boolean matchAny, boolean headersOnly) {
     String fileName = downloadFileName(topic, limit, pollingMode, format);
     return collectDownloadMessages(
             cluster,
@@ -716,7 +831,7 @@ public class MessagesService {
             pollingMode,
             offset,
             timestamp,
-            timestampTo)
+            timestampTo, matchAny, headersOnly)
         .map(
             messages ->
                 new DownloadResult(
@@ -736,6 +851,17 @@ public class MessagesService {
       @Nullable Long offset,
       @Nullable Long timestamp,
       @Nullable Long timestampTo) {
+    return collectDownloadMessages(cluster, topic, limit, partitions, containsStringFilters,
+        smartFilterId, keySerde, valueSerde, pollingMode, offset, timestamp, timestampTo,
+        false, false);
+  }
+
+  private Mono<List<TopicMessageDTO>> collectDownloadMessages(
+      KafkaCluster cluster, String topic, int limit, List<Integer> partitions,
+      @Nullable List<String> containsStringFilters, @Nullable String smartFilterId,
+      @Nullable String keySerde, @Nullable String valueSerde, PollingModeDTO pollingMode,
+      @Nullable Long offset, @Nullable Long timestamp, @Nullable Long timestampTo,
+      boolean matchAny, boolean headersOnly) {
     if (limit < 1 || limit > maxPageSize) {
       return Mono.error(
           new ValidationException("Download limit must be between 1 and " + maxPageSize));
@@ -749,10 +875,9 @@ public class MessagesService {
             smartFilterId,
             limit,
             keySerde,
-            valueSerde)
+            valueSerde, matchAny, headersOnly, timestampTo)
         .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
         .map(TopicMessageEventDTO::getMessage)
-        .filter(message -> matchesTimestampUpperBound(message, timestampTo))
         .collectList();
   }
 
@@ -772,11 +897,18 @@ public class MessagesService {
   }
 
   public int resolveDownloadLimit(@Nullable Integer limit) {
-    int resolvedLimit = Optional.ofNullable(limit).orElse(defaultPageSize);
+    int resolvedLimit = Optional.ofNullable(limit).orElse(defaultDownloadLimit);
     if (resolvedLimit < 1 || resolvedLimit > maxPageSize) {
       throw new ValidationException("Download limit must be between 1 and " + maxPageSize);
     }
     return resolvedLimit;
+  }
+
+  public record DownloadSettings(int defaultLimit, int maxLimit) {
+  }
+
+  public DownloadSettings downloadSettings() {
+    return new DownloadSettings(defaultDownloadLimit, maxPageSize);
   }
 
   public String downloadFileName(String topic, int limit) {
@@ -843,21 +975,22 @@ public class MessagesService {
                   cursorsStorage.createNewCursor(deserializer, consumerPosition, filter, limit));
           case TAILING ->
               new TailingEmitter(
-                () -> consumerGroupService.createConsumer(
-                  cluster, Map.of(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, limit)),
+                  () -> consumerGroupService.createConsumer(
+                      cluster, Map.of(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, limit)),
                   consumerPosition,
                   deserializer,
                   filter,
-                cluster.getPollingSettings(),
-                limit);
+                  cluster.getPollingSettings(),
+                  limit);
         };
-    return Flux.create(emitter).map(throttleUiPublish(consumerPosition.pollingMode()));
+    return Flux.create(emitter);
   }
 
   private Predicate<TopicMessageDTO> getMsgFilter(
-      @Nullable List<String> containsStrFilters, @Nullable String smartFilterId) {
+      @Nullable List<String> containsStrFilters, @Nullable String smartFilterId,
+      boolean matchAny, boolean headersOnly) {
     Predicate<TopicMessageDTO> messageFilter =
-        MessageFilters.containsAllStringFilters(containsStrFilters);
+        MessageFilters.search(containsStrFilters, matchAny, headersOnly);
     if (smartFilterId != null) {
       var registered = registeredFilters.getIfPresent(smartFilterId);
       if (registered == null) {
@@ -872,24 +1005,10 @@ public class MessagesService {
     return containsStringFilter == null ? List.of() : List.of(containsStringFilter);
   }
 
-  private <T> UnaryOperator<T> throttleUiPublish(PollingModeDTO pollingMode) {
-    if (pollingMode == PollingModeDTO.TAILING) {
-      RateLimiter rateLimiter = RateLimiter.create(TAILING_UI_MESSAGE_THROTTLE_RATE);
-      return m -> {
-        rateLimiter.acquire(1);
-        return m;
-      };
-    }
-    // there is no need to throttle UI production rate for non-tailing modes, since max number of
-    // produced
-    // messages is limited for them (with page size)
-    return UnaryOperator.identity();
-  }
-
   private int fixPageSize(@Nullable Integer pageSize) {
     return Optional.ofNullable(pageSize)
         .filter(ps -> ps > 0 && ps <= maxPageSize)
-        .orElse(defaultPageSize);
+        .orElse(Math.min(defaultPageSize, maxPageSize));
   }
 
   public String registerMessageFilter(String celCode) {

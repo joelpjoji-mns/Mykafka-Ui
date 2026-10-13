@@ -1,6 +1,11 @@
 import PageLoader from 'components/common/PageLoader/PageLoader';
 import TableHeaderCell from 'components/common/table/TableHeaderCell/TableHeaderCell';
-import { TopicMessage } from 'generated-sources';
+import {
+  PollingMode,
+  SortOrder,
+  TopicMessage,
+  TopicMessageConsuming,
+} from 'generated-sources';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from 'components/common/Button/Button';
 import * as S from 'components/common/NewTable/Table.styled';
@@ -9,6 +14,9 @@ import { useMessageFiltersStore } from 'lib/hooks/useMessageFiltersStore';
 import useAppParams from 'lib/hooks/useAppParams';
 import { RouteParamsClusterTopic } from 'lib/paths';
 import { useLocalStorage } from 'lib/hooks/useLocalStorage';
+import { useSearchParams } from 'react-router-dom';
+import FlexBox from 'components/common/FlexBox/FlexBox';
+import { MessagesFilterKeys } from 'lib/constants';
 
 import Message, { PreviewFilter } from './Message';
 import PreviewModal from './PreviewModal';
@@ -18,6 +26,8 @@ export interface MessagesTableProps {
   messages: TopicMessage[];
   isFetching: boolean;
   animateLiveArrivals?: boolean;
+  abortFetchData?: () => void;
+  consumptionStats?: TopicMessageConsuming;
 }
 
 type PreviewTarget = 'key' | 'headers' | 'content';
@@ -104,8 +114,56 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
   messages,
   isFetching,
   animateLiveArrivals = false,
+  abortFetchData,
+  consumptionStats,
 }) => {
+  const [params, setParams] = useSearchParams();
+  const wholeTopic = params.has('orderBy');
+  const [cancelled, setCancelled] = useState(false);
+  const scanning =
+    wholeTopic && params.has('orderBy') && isFetching && !cancelled;
+  useEffect(() => {
+    if (isFetching) setCancelled(false);
+  }, [isFetching]);
   const paginate = usePaginateTopics();
+  const orderBy = params.get('orderBy');
+  const sortOrder =
+    params.get('sortOrder') === 'DESC' ? SortOrder.DESC : SortOrder.ASC;
+  let scanStatus =
+    'Click a heading to rank all retained matching records across all partitions. Time/offset bounds are ignored; new arrivals require another scan.';
+  if (cancelled) {
+    scanStatus = 'Scan cancelled. No partial ranking is shown.';
+  } else if (scanning) {
+    scanStatus = `Scanning whole topic: ${consumptionStats?.messagesConsumed || 0} records read...`;
+  }
+  const getSortProps = (columnId: ResizableMessageColumnId) => ({
+    orderBy,
+    sortOrder,
+    orderValue: columnId,
+    handleOrderBy: (column: string | null) => {
+      if (column) {
+        setCancelled(false);
+        setParams((current) => {
+          const next = new URLSearchParams(current);
+          next.delete('sortScope');
+          next.set('orderBy', column);
+          next.set(
+            'sortOrder',
+            column === orderBy && sortOrder === SortOrder.ASC ? 'DESC' : 'ASC'
+          );
+          next.set(MessagesFilterKeys.mode, PollingMode.EARLIEST);
+          [
+            MessagesFilterKeys.cursor,
+            MessagesFilterKeys.partitions,
+            MessagesFilterKeys.offset,
+            MessagesFilterKeys.timestamp,
+            MessagesFilterKeys.timestampTo,
+          ].forEach((key) => next.delete(key));
+          return next;
+        });
+      }
+    },
+  });
   const [previewFor, setPreviewFor] = useState<PreviewTarget | null>(null);
   const [keyFilters, setKeyFilters] = useState<PreviewFilter[]>([]);
   const [headersFilters, setHeadersFilters] = useState<PreviewFilter[]>([]);
@@ -310,6 +368,26 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
 
   return (
     <div style={{ position: 'relative' }}>
+      <FlexBox
+        padding="12px 16px"
+        gap="12px"
+        alignItems="center"
+        flexWrap="wrap"
+      >
+        <span role="status">{scanStatus}</span>
+        {scanning && (
+          <Button
+            buttonType="secondary"
+            buttonSize="M"
+            onClick={() => {
+              abortFetchData?.();
+              setCancelled(true);
+            }}
+          >
+            Cancel topic scan
+          </Button>
+        )}
+      </FlexBox>
       {previewFor !== null && (
         <PreviewModal
           values={getPreviewFilters()}
@@ -330,19 +408,34 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
           <thead>
             <tr>
               <TableHeaderCell> </TableHeaderCell>
-              <TableHeaderCell title="Message ID" {...getResizeProps('id')} />
-              <TableHeaderCell title="Offset" {...getResizeProps('offset')} />
+              <TableHeaderCell
+                title="Message ID"
+                {...getSortProps('id')}
+                {...getResizeProps('id')}
+              />
+              <TableHeaderCell
+                title="Offset"
+                {...getSortProps('offset')}
+                {...getResizeProps('offset')}
+              />
               <TableHeaderCell
                 title="Partition"
+                {...getSortProps('partition')}
                 {...getResizeProps('partition')}
               />
               <TableHeaderCell
                 title="Timestamp"
+                {...getSortProps('timestamp')}
                 {...getResizeProps('timestamp')}
               />
-              <TableHeaderCell title="Size" {...getResizeProps('size')} />
+              <TableHeaderCell
+                title="Size"
+                {...getSortProps('size')}
+                {...getResizeProps('size')}
+              />
               <TableHeaderCell
                 title="Key"
+                {...getSortProps('key')}
                 previewText={`Preview ${
                   keyFilters.length ? `(${keyFilters.length} selected)` : ''
                 }`}
@@ -351,6 +444,7 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
               />
               <TableHeaderCell
                 title="Headers"
+                {...getSortProps('headers')}
                 previewText={`Preview ${
                   headersFilters.length
                     ? `(${headersFilters.length} selected)`
@@ -361,6 +455,7 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
               />
               <TableHeaderCell
                 title="Value"
+                {...getSortProps('value')}
                 previewText={`Preview ${
                   contentFilters.length
                     ? `(${contentFilters.length} selected)`
@@ -373,29 +468,30 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
             </tr>
           </thead>
           <tbody>
-            {messages.map((message: TopicMessage) => (
-              <Message
-                key={[
-                  message.offset,
-                  message.timestamp,
-                  message.key,
-                  message.partition,
-                ].join('-')}
-                message={message}
-                keyFilters={keyFilters}
-                headersFilters={headersFilters}
-                contentFilters={contentFilters}
-                isLiveArrival={isLive && animateLiveArrivals}
-              />
-            ))}
-            {isFetching && !messages.length && (
+            {!cancelled &&
+              messages.map((message: TopicMessage) => (
+                <Message
+                  key={[
+                    message.offset,
+                    message.timestamp,
+                    message.key,
+                    message.partition,
+                  ].join('-')}
+                  message={message}
+                  keyFilters={keyFilters}
+                  headersFilters={headersFilters}
+                  contentFilters={contentFilters}
+                  isLiveArrival={isLive && animateLiveArrivals}
+                />
+              ))}
+            {!cancelled && isFetching && !messages.length && (
               <tr>
                 <td colSpan={10}>
                   <PageLoader />
                 </td>
               </tr>
             )}
-            {messages.length === 0 && !isFetching && (
+            {!cancelled && messages.length === 0 && !isFetching && (
               <tr>
                 <td colSpan={10}>No messages found</td>
               </tr>
@@ -406,7 +502,7 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
       <S.Pagination>
         <S.Pages>
           <Button
-            disabled={isLive || isFetching || !nextCursor}
+            disabled={wholeTopic || isLive || isFetching || !nextCursor}
             buttonType="secondary"
             buttonSize="L"
             onClick={paginate}

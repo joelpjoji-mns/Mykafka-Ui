@@ -16,6 +16,11 @@ import { useIsLiveMode } from 'lib/hooks/useMessagesFilters';
 import useAppParams from 'lib/hooks/useAppParams';
 import { LOCAL_STORAGE_KEY_PREFIX } from 'lib/constants';
 import { TopicActionsProvider } from 'components/contexts/TopicActionsContext';
+import { useLocation } from 'react-router-dom';
+
+const QueryLocation = () => (
+  <output data-testid="query-location">{useLocation().search}</output>
+);
 
 export const topicMessagePayload: TopicMessage = {
   partition: 29,
@@ -50,7 +55,10 @@ jest.mock('lib/hooks/useAppParams', () => ({
 describe('MessagesTable', () => {
   beforeEach(() => localStorage.clear());
 
-  const renderComponent = (props?: Partial<MessagesTableProps>) => {
+  const renderComponent = (
+    props?: Partial<MessagesTableProps>,
+    query = '/'
+  ) => {
     (useAppParams as jest.Mock).mockImplementation(() => ({
       clusterName: 'testCluster',
       topicName: 'testTopic',
@@ -58,9 +66,129 @@ describe('MessagesTable', () => {
     return render(
       <TopicActionsProvider openSidebarWithMessage={jest.fn()}>
         <MessagesTable messages={[]} isFetching={false} {...props} />
-      </TopicActionsProvider>
+        <QueryLocation />
+      </TopicActionsProvider>,
+      { initialEntries: [query] }
     );
   };
+
+  it('requests full-topic ascending/descending rankings without locally reordering rows', async () => {
+    renderComponent(
+      {
+        messages: [
+          { ...topicMessagePayload, offset: 10, valueSize: 100 },
+          { ...topicMessagePayload, offset: 1, valueSize: 1 },
+        ],
+      },
+      '/?mode=EARLIEST&stringFilter=needle'
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Size' }));
+    let params = new URLSearchParams(
+      screen.getByTestId('query-location').textContent || ''
+    );
+    expect(params.get('orderBy')).toBe('size');
+    expect(params.get('sortOrder')).toBe('ASC');
+    expect(params.get('stringFilter')).toBe('needle');
+    expect(
+      screen.queryByRole('listbox', { name: 'Sorting scope' })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next →' })).toBeDisabled();
+    const offsets = Array.from(
+      screen.getByRole('table').querySelectorAll('tbody tr')
+    ).map((row) => Number(row.querySelectorAll('td')[2].textContent));
+    expect(offsets).toEqual([10, 1]);
+    await userEvent.click(screen.getByRole('button', { name: 'Size' }));
+    params = new URLSearchParams(
+      screen.getByTestId('query-location').textContent || ''
+    );
+    expect(params.get('sortOrder')).toBe('DESC');
+  });
+
+  it('shows full-topic progress and cancels without presenting a partial ranking', async () => {
+    const abortFetchData = jest.fn();
+    renderComponent(
+      {
+        isFetching: true,
+        abortFetchData,
+        consumptionStats: {
+          messagesConsumed: 1200,
+          bytesConsumed: 10000,
+          elapsedMs: 50,
+        },
+      },
+      '/?orderBy=size&sortOrder=DESC'
+    );
+    expect(
+      screen.getByText('Scanning whole topic: 1200 records read...')
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Cancel topic scan' })
+    );
+    expect(abortFetchData).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText('Scan cancelled. No partial ranking is shown.')
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ['Offset', 'offset'],
+    ['Partition', 'partition'],
+    ['Timestamp', 'timestamp'],
+    ['Message ID', 'id'],
+    ['Key', 'key'],
+    ['Headers', 'headers'],
+    ['Value', 'value'],
+    ['Size', 'size'],
+  ])(
+    'requests global %s sorting without modifying incoming messages',
+    async (heading, column) => {
+      const messages = [
+        {
+          ...topicMessagePayload,
+          offset: 10,
+          partition: 2,
+          timestamp: new Date('2024-02-01'),
+          key: 'z',
+          value: 'z',
+          headers: { id: 'z' },
+          keySize: 20,
+          valueSize: 30,
+          headersSize: 0,
+        },
+        {
+          ...topicMessagePayload,
+          offset: 2,
+          partition: 1,
+          timestamp: new Date('2024-01-01'),
+          key: 'a',
+          value: 'a',
+          headers: { id: 'a' },
+          keySize: 1,
+          valueSize: 1,
+          headersSize: 100,
+        },
+      ];
+      renderComponent({ messages });
+      const offsets = () =>
+        Array.from(screen.getByRole('table').querySelectorAll('tbody tr')).map(
+          (row) => Number(row.querySelectorAll('td')[2].textContent)
+        );
+      await userEvent.click(screen.getByRole('button', { name: heading }));
+      let params = new URLSearchParams(
+        screen.getByTestId('query-location').textContent || ''
+      );
+      expect(params.get('orderBy')).toBe(column);
+      expect(params.get('sortOrder')).toBe('ASC');
+      expect(offsets()).toEqual([10, 2]);
+      await userEvent.click(screen.getByRole('button', { name: heading }));
+      params = new URLSearchParams(
+        screen.getByTestId('query-location').textContent || ''
+      );
+      expect(params.get('sortOrder')).toBe('DESC');
+      expect(offsets()).toEqual([10, 2]);
+      expect(messages.map(({ offset }) => offset)).toEqual([10, 2]);
+    }
+  );
 
   describe('Default props Setup for MessagesTable component', () => {
     beforeEach(() => {

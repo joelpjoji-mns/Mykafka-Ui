@@ -29,6 +29,9 @@ describe('TableHeaderCell.Styled', () => {
       it('should test the props of Title Component', () => {
         const titleElement = screen.getByText(DEFAULT_TITLE_TEXT);
         expect(titleElement).toBeInTheDocument();
+        expect(titleElement).not.toHaveAttribute('isOrdered');
+        expect(titleElement).not.toHaveAttribute('isOrderable');
+        expect(titleElement).not.toHaveAttribute('sortOrder');
         expect(titleElement).toHaveStyle(
           `color: ${theme.table.th.color.active};`
         );

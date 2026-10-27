@@ -123,19 +123,32 @@ class MessagesServiceTest extends AbstractIntegrationTest {
     messagesService.sendMessage(cluster, topic, new CreateTopicMessageDTO()
         .partition(0).key("key").value("a")
         .keySerde(StringSerde.NAME).valueSerde(StringSerde.NAME)).block();
-    var smallest = messagesService.loadSortedTopicMessages(cluster, topic, List.of(), null, 1,
+    var smallest = finalMessages(messagesService.loadSortedTopicMessages(cluster, topic, List.of(), null, 1,
         StringSerde.NAME, StringSerde.NAME, false, false, "size", "ASC")
-        .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
-        .map(TopicMessageEventDTO::getMessage).collectList().block(Duration.ofSeconds(30));
+        .collectList().block(Duration.ofSeconds(30)));
     assertThat(smallest).hasSize(1);
     assertThat(smallest.getFirst().getValue()).isEqualTo("a");
-    var filtered = messagesService.loadSortedTopicMessages(cluster, topic, List.of("middle-"), null, 1,
+    var filtered = finalMessages(messagesService.loadSortedTopicMessages(cluster, topic, List.of("middle-"), null, 1,
         StringSerde.NAME, StringSerde.NAME, false, false, "offset", "DESC")
-        .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
-        .map(TopicMessageEventDTO::getMessage).collectList().block(Duration.ofSeconds(30));
+        .collectList().block(Duration.ofSeconds(30)));
     assertThat(filtered).hasSize(1);
     assertThat(filtered.getFirst().getOffset()).isEqualTo(549L);
     assertThat(filtered.getFirst().getValue()).startsWith("middle-");
+  }
+
+  private static List<TopicMessageDTO> finalMessages(List<TopicMessageEventDTO> events) {
+    int finalIndex = -1;
+    for (int index = 0; index < events.size(); index++) {
+      var event = events.get(index);
+      if (event.getType() == TopicMessageEventDTO.TypeEnum.PHASE
+          && "Final sort results".equals(event.getPhase().getName())) {
+        finalIndex = index;
+      }
+    }
+    return events.subList(finalIndex + 1, events.size()).stream()
+        .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
+        .map(TopicMessageEventDTO::getMessage)
+        .toList();
   }
 
   @Test

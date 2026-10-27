@@ -14,6 +14,13 @@ export const Breadcrumbs = styled.div`
   }
 `;
 
+export const HeadingGroup = styled.div`
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+`;
+
 export const BackLink = styled(NavLink)`
   color: ${({ theme }) => theme.pageHeading.backLink.color.normal};
   position: relative;

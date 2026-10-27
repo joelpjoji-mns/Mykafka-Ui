@@ -11,12 +11,7 @@ import {
 } from 'lib/paths';
 
 import * as S from './CommandPalette.styled';
-
-export interface PaletteItem {
-  type: string;
-  label: string;
-  to: string;
-}
+import CommandPaletteList, { PaletteItem } from './CommandPaletteList';
 
 interface CommandPaletteResultsProps {
   clusterName: string;
@@ -126,20 +121,12 @@ const CommandPaletteResults: React.FC<CommandPaletteResultsProps> = ({
   }
 
   return (
-    <S.ResultsList role="listbox" aria-label="Command palette results">
-      {items.map((item, index) => (
-        <S.ResultRow
-          key={`${item.type}-${item.label}`}
-          role="option"
-          aria-selected={index === highlightIndex}
-          $active={index === highlightIndex}
-          onClick={() => onSelect(item.to)}
-        >
-          <S.TypeBadge>{item.type}</S.TypeBadge>
-          <S.ItemLabel>{item.label}</S.ItemLabel>
-        </S.ResultRow>
-      ))}
-    </S.ResultsList>
+    <CommandPaletteList
+      label="Command palette results"
+      sections={[{ items }]}
+      highlightIndex={highlightIndex}
+      onSelect={onSelect}
+    />
   );
 };
 

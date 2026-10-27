@@ -28,6 +28,8 @@ This file describes the release policy and the durable product milestones. The G
 - Added safe consumer offset reset previews and inactive-group protection.
 - Added topic download/upload, Developer Hub, Operations Center, Topic Governance, Audit Explorer, Record Explorer, and refined Glass/AMOLED themes.
 - Added **Pause live / Resume live** for live tailing, buffering arrivals while paused.
+- Added **Compare messages** (side-by-side metadata and value/key/headers diff) and **View surrounding messages** (offset window around a record, highlighted).
+- Added **Favorites** and **Recently visited** topics and consumer groups, with quick links on list pages and in the Ctrl/Cmd+K palette.
 
 ### Performance and reliability
 

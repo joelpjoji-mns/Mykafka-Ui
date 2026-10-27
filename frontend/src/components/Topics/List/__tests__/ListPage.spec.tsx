@@ -5,6 +5,7 @@ import ClusterContext from 'components/contexts/ClusterContext';
 import userEvent from '@testing-library/user-event';
 import { clusterTopicsPath } from 'lib/paths';
 import ListPage from 'components/Topics/List/ListPage';
+import { useFavoritesStore } from 'lib/hooks/useFavorites';
 
 const clusterName = 'test-cluster';
 
@@ -47,6 +48,35 @@ describe('ListPage Component', () => {
 
     it('renders the TopicsTable', () => {
       expect(screen.getByText('TopicTableMock')).toBeInTheDocument();
+    });
+  });
+
+  describe('Favorites row', () => {
+    beforeEach(() => {
+      localStorage.clear();
+      useFavoritesStore.setState({ clusters: {} });
+    });
+
+    it('is hidden when the cluster has no favorite topics', () => {
+      renderComponent();
+      expect(
+        screen.queryByRole('navigation', { name: 'Favorite topics' })
+      ).not.toBeInTheDocument();
+    });
+
+    it('links to favorite topics of the current cluster', () => {
+      useFavoritesStore
+        .getState()
+        .toggleFavorite(clusterName, { type: 'topic', name: 'orders' });
+      renderComponent();
+
+      expect(
+        screen.getByRole('navigation', { name: 'Favorite topics' })
+      ).toHaveTextContent('Favorites');
+      expect(screen.getByRole('link', { name: 'orders' })).toHaveAttribute(
+        'href',
+        `${clusterTopicsPath(clusterName)}/orders`
+      );
     });
   });
 });

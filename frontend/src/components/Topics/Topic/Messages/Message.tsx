@@ -11,6 +11,7 @@ import BytesFormatted from 'components/common/BytesFormatted/BytesFormatted';
 import { useTimezone } from 'lib/hooks/useTimezones';
 import ClusterContext from 'components/contexts/ClusterContext';
 import HighlightedText from 'components/common/HighlightedText/HighlightedText';
+import { useIsSelectedForCompare } from 'lib/hooks/useMessageCompareStore';
 
 import MessageContent from './MessageContent/MessageContent';
 import MessageActions from './MessageActions';
@@ -28,6 +29,9 @@ export interface Props {
   message: TopicMessage;
   isLiveArrival?: boolean;
   searchTerms?: string[];
+  compareScope?: string;
+  // Highlighted target of "View surrounding messages".
+  isAnchor?: boolean;
 }
 
 const EMPTY_SEARCH_TERMS: string[] = [];
@@ -78,8 +82,18 @@ const Message: React.FC<Props> = ({
   contentFilters,
   isLiveArrival = false,
   searchTerms = EMPTY_SEARCH_TERMS,
+  compareScope,
+  isAnchor = false,
 }) => {
   const { currentTimezone } = useTimezone();
+  const isSelectedForCompare = useIsSelectedForCompare(compareScope, message);
+  const rowRef = React.useRef<HTMLTableRowElement>(null);
+
+  React.useEffect(() => {
+    if (isAnchor) {
+      rowRef.current?.scrollIntoView?.({ block: 'center' });
+    }
+  }, [isAnchor]);
   const [isOpen, setIsOpen] = React.useState(false);
   const { messageRelativeTimestamp } = React.useContext(ClusterContext);
 
@@ -147,8 +161,13 @@ const Message: React.FC<Props> = ({
   return (
     <>
       <S.ClickableRow
+        ref={rowRef}
         $isLiveArrival={isLiveArrival}
+        $isSelected={isSelectedForCompare}
+        $isAnchor={isAnchor}
+        aria-current={isAnchor || undefined}
         data-live-arrival={isLiveArrival || undefined}
+        data-compare-selected={isSelectedForCompare || undefined}
         onMouseEnter={() => setVEllipsisOpen(true)}
         onMouseLeave={() => setVEllipsisOpen(false)}
         onClick={toggleIsOpen}

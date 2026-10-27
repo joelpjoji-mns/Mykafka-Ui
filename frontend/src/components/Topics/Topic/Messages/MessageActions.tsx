@@ -4,7 +4,14 @@ import { Dropdown, DropdownItem } from 'components/common/Dropdown';
 import { ActionDropdownItem } from 'components/common/ActionComponent';
 import useDataSaver from 'lib/hooks/useDataSaver';
 import useAppParams from 'lib/hooks/useAppParams';
-import { RouteParamsClusterTopic } from 'lib/paths';
+import { clusterTopicMessagesPath, RouteParamsClusterTopic } from 'lib/paths';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  messageCompareScope,
+  useIsSelectedForCompare,
+  useMessageCompareStore,
+} from 'lib/hooks/useMessageCompareStore';
+import { surroundingMessagesSearch } from 'lib/utils/surroundingMessages';
 import { useTopicActions } from 'components/contexts/TopicActionsContext';
 import { Modal } from 'components/common/Modal';
 import PageLoader from 'components/common/PageLoader/PageLoader';
@@ -16,9 +23,21 @@ interface MessageActionsProps {
 }
 
 const MessageActions: React.FC<MessageActionsProps> = ({ message }) => {
-  const { topicName } = useAppParams<RouteParamsClusterTopic>();
+  const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
   const { openSidebarWithMessage } = useTopicActions();
   const [isResetOffsetsOpen, setIsResetOffsetsOpen] = React.useState(false);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const compareScope = messageCompareScope(clusterName, topicName);
+  const isSelectedForCompare = useIsSelectedForCompare(compareScope, message);
+  const toggleCompare = useMessageCompareStore((state) => state.toggle);
+
+  const showSurroundingMessages = () => {
+    navigate({
+      pathname: clusterTopicMessagesPath(clusterName, topicName),
+      search: `?${surroundingMessagesSearch(message, searchParams)}`,
+    });
+  };
 
   const savedMessageJson = {
     Value: message.value,
@@ -42,6 +61,20 @@ const MessageActions: React.FC<MessageActionsProps> = ({ message }) => {
         </DropdownItem>
         <DropdownItem aria-label="Save as a file" onClick={saveFile}>
           Save as a file
+        </DropdownItem>
+        <DropdownItem
+          aria-label={
+            isSelectedForCompare ? 'Remove from compare' : 'Select for compare'
+          }
+          onClick={() => toggleCompare(compareScope, message)}
+        >
+          {isSelectedForCompare ? 'Remove from compare' : 'Select for compare'}
+        </DropdownItem>
+        <DropdownItem
+          aria-label="View surrounding messages"
+          onClick={showSurroundingMessages}
+        >
+          View surrounding messages
         </DropdownItem>
         <DropdownItem
           aria-label="Reset consumer offset"

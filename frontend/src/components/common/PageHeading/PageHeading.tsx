@@ -1,4 +1,4 @@
-import React, { PropsWithChildren } from 'react';
+import React, { PropsWithChildren, ReactNode } from 'react';
 import Heading from 'components/common/heading/Heading.styled';
 import { buildPageTitle } from 'lib/pageTitles';
 
@@ -10,6 +10,7 @@ interface PageHeadingProps {
   backText?: string;
   title?: string;
   documentTitle?: string;
+  headingAddon?: ReactNode;
 }
 
 const PageHeading: React.FC<PropsWithChildren<PageHeadingProps>> = ({
@@ -19,6 +20,7 @@ const PageHeading: React.FC<PropsWithChildren<PageHeadingProps>> = ({
   children,
   title,
   documentTitle,
+  headingAddon,
 }) => {
   const isBackButtonVisible = backTo && backText;
   React.useEffect(() => {
@@ -33,7 +35,14 @@ const PageHeading: React.FC<PropsWithChildren<PageHeadingProps>> = ({
           {isBackButtonVisible && (
             <S.BackLink to={backTo}>{backText}</S.BackLink>
           )}
-          <Heading>{text}</Heading>
+          {headingAddon ? (
+            <S.HeadingGroup>
+              <Heading>{text}</Heading>
+              {headingAddon}
+            </S.HeadingGroup>
+          ) : (
+            <Heading>{text}</Heading>
+          )}
         </S.Breadcrumbs>
         <div>{children}</div>
       </S.Content>

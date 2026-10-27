@@ -5,7 +5,9 @@ import { ClusterNameRoute } from 'lib/paths';
 import ClusterContext from 'components/contexts/ClusterContext';
 
 import * as S from './CommandPalette.styled';
-import CommandPaletteResults, { PaletteItem } from './CommandPaletteResults';
+import CommandPaletteResults from './CommandPaletteResults';
+import CommandPaletteQuickAccess from './CommandPaletteQuickAccess';
+import { PaletteItem } from './CommandPaletteList';
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -122,9 +124,12 @@ const CommandPalette: React.FC = () => {
             onSelect={select}
           />
         ) : (
-          <S.Message>
-            Type to search across this cluster. Press Esc to close.
-          </S.Message>
+          <CommandPaletteQuickAccess
+            clusterName={clusterName}
+            highlightIndex={highlight}
+            onItems={setItems}
+            onSelect={select}
+          />
         )}
       </S.Panel>
     </S.Overlay>

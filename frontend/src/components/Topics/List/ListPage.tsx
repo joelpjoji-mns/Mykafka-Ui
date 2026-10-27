@@ -24,6 +24,7 @@ import useAppParams from 'lib/hooks/useAppParams';
 import { ClusterName } from 'lib/interfaces/cluster';
 import { DownloadCsvButton } from 'components/common/DownloadCsvButton/DownloadCsvButton';
 import { topicsApiClient } from 'lib/api';
+import FavoritesBar from 'components/common/FavoritesBar/FavoritesBar';
 
 const ListPage: React.FC = () => {
   const { clusterName } = useAppParams<{ clusterName: ClusterName }>();
@@ -97,6 +98,7 @@ const ListPage: React.FC = () => {
           />
         </>
       </ResourcePageHeading>
+      <FavoritesBar clusterName={clusterName} type="topic" />
       <ControlPanelWrapper hasInput>
         <Search
           key={clusterName}

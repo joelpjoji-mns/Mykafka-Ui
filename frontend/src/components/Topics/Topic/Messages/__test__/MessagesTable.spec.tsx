@@ -18,6 +18,10 @@ import { LOCAL_STORAGE_KEY_PREFIX } from 'lib/constants';
 import { TopicActionsProvider } from 'components/contexts/TopicActionsContext';
 import { useLocation } from 'react-router-dom';
 import { useMessageFiltersStore } from 'lib/hooks/useMessageFiltersStore';
+import {
+  messageCompareScope,
+  useMessageCompareStore,
+} from 'lib/hooks/useMessageCompareStore';
 
 const QueryLocation = () => (
   <output data-testid="query-location">{useLocation().search}</output>
@@ -53,10 +57,32 @@ jest.mock('lib/hooks/useAppParams', () => ({
   default: jest.fn(),
 }));
 
+jest.mock(
+  'components/Topics/Topic/Messages/MessageCompare/MessageCompareModal',
+  () => ({
+    __esModule: true,
+    default: ({
+      messages,
+      onClose,
+    }: {
+      messages: TopicMessage[];
+      onClose: () => void;
+    }) => (
+      <div role="dialog" aria-label="Compare messages">
+        {messages.map(({ offset }) => offset).join(' vs ')}
+        <button type="button" onClick={onClose}>
+          close compare
+        </button>
+      </div>
+    ),
+  })
+);
+
 describe('MessagesTable', () => {
   beforeEach(() => {
     localStorage.clear();
     useMessageFiltersStore.getState().setNextCursor(undefined);
+    useMessageCompareStore.getState().clear();
   });
 
   const renderComponent = (
@@ -463,6 +489,73 @@ describe('MessagesTable', () => {
       expect(
         screen.queryByRole('button', { name: /pause live/i })
       ).not.toBeInTheDocument();
+    });
+
+    it('compares two selected messages and clears the selection', async () => {
+      (useIsLiveMode as jest.Mock).mockImplementation(() => false);
+      const second = { ...topicMessagePayload, offset: 15 };
+      renderComponent({ messages: [topicMessagePayload, second] });
+      const scope = messageCompareScope('testCluster', 'testTopic');
+
+      act(() =>
+        useMessageCompareStore.getState().toggle(scope, topicMessagePayload)
+      );
+      expect(
+        screen.getByRole('button', { name: 'Compare (1 of 2 selected)' })
+      ).toBeDisabled();
+      expect(
+        document.querySelectorAll('[data-compare-selected="true"]')
+      ).toHaveLength(1);
+
+      act(() => useMessageCompareStore.getState().toggle(scope, second));
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Compare messages' })
+      );
+      expect(
+        await screen.findByRole('dialog', { name: 'Compare messages' })
+      ).toHaveTextContent('14 vs 15');
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'close compare' })
+      );
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Clear compare' })
+      );
+      expect(
+        screen.queryByRole('button', { name: /compare/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('highlights the anchor message from surrounding messages', () => {
+      (useIsLiveMode as jest.Mock).mockImplementation(() => false);
+      const scrollIntoView = jest.fn();
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        value: scrollIntoView,
+      });
+      renderComponent(
+        {
+          messages: [
+            { ...topicMessagePayload, offset: 13 },
+            topicMessagePayload,
+          ],
+        },
+        '/?mode=FROM_OFFSET&anchor=29:14'
+      );
+
+      const anchor = document.querySelector('tr[aria-current="true"]');
+      expect(anchor).toHaveTextContent('29:14');
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+    });
+
+    it('ignores a stale anchor outside the surrounding-messages view', () => {
+      (useIsLiveMode as jest.Mock).mockImplementation(() => true);
+      renderComponent(
+        { messages: [topicMessagePayload] },
+        '/?mode=TAILING&anchor=29:14'
+      );
+      expect(document.querySelector('tr[aria-current]')).toBeNull();
     });
 
     it('shows inline loading status without a blocking spinner', () => {

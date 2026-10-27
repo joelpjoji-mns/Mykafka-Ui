@@ -58,6 +58,27 @@ export const ResultsList = styled.ul`
   overflow-y: auto;
 `;
 
+export const Section = styled.li`
+  & + & {
+    margin-top: 4px;
+  }
+`;
+
+export const SectionTitle = styled.div`
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: ${({ theme }) => theme.input.label.color};
+`;
+
+export const SectionList = styled.ul`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+`;
+
 export const ResultRow = styled.li<{ $active?: boolean }>`
   display: flex;
   align-items: center;

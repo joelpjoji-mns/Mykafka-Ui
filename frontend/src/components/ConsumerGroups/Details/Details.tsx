@@ -34,6 +34,8 @@ import { LagTrendComponent } from 'lib/consumerGroups';
 import { RefreshRateSelect } from 'components/common/RefreshRateSelect/RefreshRateSelect';
 import { useConnectors } from 'lib/hooks/api/kafkaConnect';
 import { useGetConsumerGroupLagsInfo } from 'components/ConsumerGroups/Details/useGetConsumerGroupLagsInfo';
+import FavoriteToggle from 'components/common/FavoriteToggle/FavoriteToggle';
+import { useRecordVisit } from 'lib/hooks/useFavorites';
 
 import { TopicsTable } from './TopicsTable/TopicsTable';
 
@@ -47,6 +49,7 @@ const Details: React.FC = () => {
   const { isReadOnly, hasKafkaConnectConfigured } = useContext(ClusterContext);
   const routeParams = useAppParams<ClusterGroupParam>();
   const { clusterName, consumerGroupID } = routeParams;
+  useRecordVisit(clusterName, 'consumerGroup', consumerGroupID);
 
   const goBackPath =
     backReference?.goBackPath ?? clusterConsumerGroupsPath(clusterName);
@@ -106,6 +109,13 @@ const Details: React.FC = () => {
                 text={consumerGroupID}
                 backTo={goBackPath}
                 backText={goBackText}
+                headingAddon={
+                  <FavoriteToggle
+                    clusterName={clusterName}
+                    type="consumerGroup"
+                    name={consumerGroupID}
+                  />
+                }
               >
                 <Button
                   buttonType="secondary"

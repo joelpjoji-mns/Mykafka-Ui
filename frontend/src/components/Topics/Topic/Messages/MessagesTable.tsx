@@ -21,10 +21,19 @@ import { useLocalStorage } from 'lib/hooks/useLocalStorage';
 import { useSearchParams } from 'react-router-dom';
 import { MessagesFilterKeys } from 'lib/constants';
 import { uniqueKeys } from 'lib/utils/uniqueKeys';
+import {
+  messageCompareScope,
+  useComparedMessages,
+  useMessageCompareStore,
+} from 'lib/hooks/useMessageCompareStore';
 
 import Message, { PreviewFilter } from './Message';
 import PreviewModal from './PreviewModal';
 import * as TableS from './MessagesTable.styled';
+
+const MessageCompareModal = React.lazy(
+  () => import('./MessageCompare/MessageCompareModal')
+);
 
 export interface MessagesTableProps {
   messages: TopicMessage[];
@@ -233,6 +242,15 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
   const isLive = useIsLiveMode();
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
   const previewStorageKey = `${clusterName}:${topicName}`;
+  const compareScope = messageCompareScope(clusterName, topicName);
+  const comparedMessages = useComparedMessages(compareScope);
+  const clearComparedMessages = useMessageCompareStore((state) => state.clear);
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  // Only meaningful for the offset window opened by "View surrounding messages".
+  const anchorMessageId =
+    params.get(MessagesFilterKeys.mode) === PollingMode.FROM_OFFSET
+      ? params.get(MessagesFilterKeys.anchor)
+      : null;
   const [messagesPreview, setMessagesPreview] =
     useLocalStorage<MessagePreviewProps>('message-preview', {});
   const [storedColumnWidths, setStoredColumnWidths] =
@@ -444,6 +462,32 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
               Cancel topic scan
             </Button>
           )}
+          {comparedMessages.length > 0 && (
+            <>
+              <Button
+                buttonType="primary"
+                buttonSize="M"
+                disabled={comparedMessages.length < 2}
+                title={
+                  comparedMessages.length < 2
+                    ? 'Select one more message from its actions menu'
+                    : undefined
+                }
+                onClick={() => setIsCompareOpen(true)}
+              >
+                {comparedMessages.length < 2
+                  ? 'Compare (1 of 2 selected)'
+                  : 'Compare messages'}
+              </Button>
+              <Button
+                buttonType="text"
+                buttonSize="M"
+                onClick={clearComparedMessages}
+              >
+                Clear compare
+              </Button>
+            </>
+          )}
           {isLive && animateLiveArrivals && onPauseLive && onResumeLive && (
             <Button
               buttonType="secondary"
@@ -476,6 +520,14 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
           </Button>
         </TableS.ScanActions>
       </TableS.ScanToolbar>
+      {isCompareOpen && comparedMessages.length === 2 && (
+        <React.Suspense fallback={null}>
+          <MessageCompareModal
+            messages={[comparedMessages[0], comparedMessages[1]]}
+            onClose={() => setIsCompareOpen(false)}
+          />
+        </React.Suspense>
+      )}
       {previewFor !== null && (
         <PreviewModal
           values={getPreviewFilters()}
@@ -566,6 +618,10 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
                   contentFilters={contentFilters}
                   isLiveArrival={isLive && animateLiveArrivals}
                   searchTerms={searchTerms}
+                  compareScope={compareScope}
+                  isAnchor={
+                    anchorMessageId === `${message.partition}:${message.offset}`
+                  }
                 />
               ))}
             {!cancelled && isFetching && !messages.length && (

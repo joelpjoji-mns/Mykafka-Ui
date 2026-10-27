@@ -151,4 +151,5 @@ export const MessagesFilterKeys = {
   activeFilterNPId: 'activeFilterNPId', // not persisted filter name to indicate the refresh
   cursor: 'cursor',
   r: 'r', // used tp force refresh of the data
+  anchor: 'anchor', // partition:offset of a message to highlight
 } as const;

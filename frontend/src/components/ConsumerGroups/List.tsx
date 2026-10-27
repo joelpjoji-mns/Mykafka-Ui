@@ -27,6 +27,9 @@ import PageLoader from 'components/common/PageLoader/PageLoader';
 import ErrorPage from 'components/ErrorPage/ErrorPage';
 import { LagTrendComponent } from 'lib/consumerGroups';
 import { useConsumerGroupsLagTrends } from 'components/ConsumerGroups/lib/useConsumerGroupsLagTrends';
+import FavoriteToggle from 'components/common/FavoriteToggle/FavoriteToggle';
+import { WithFavoriteToggle } from 'components/common/FavoriteToggle/FavoriteToggle.styled';
+import FavoritesBar from 'components/common/FavoritesBar/FavoritesBar';
 
 import LagThresholdControl from './LagThresholdControl';
 
@@ -67,13 +70,24 @@ const List = () => {
       header: 'Group ID',
       accessorKey: 'groupId',
       // eslint-disable-next-line react/no-unstable-nested-components
-      cell: ({ getValue }) => (
-        <LinkCell
-          wordBreak
-          value={`${getValue<string | number>()}`}
-          to={encodeURIComponent(`${getValue<string | number>()}`)}
-        />
-      ),
+      cell: ({ getValue }) => {
+        const groupId = `${getValue<string | number>()}`;
+        return (
+          <WithFavoriteToggle>
+            <FavoriteToggle
+              clusterName={clusterName}
+              type="consumerGroup"
+              name={groupId}
+              size="S"
+            />
+            <LinkCell
+              wordBreak
+              value={groupId}
+              to={encodeURIComponent(groupId)}
+            />
+          </WithFavoriteToggle>
+        );
+      },
       size: 600,
       meta: {
         csvFn: (row) => row.groupId,
@@ -157,6 +171,7 @@ const List = () => {
           fetchCsv={fetchCsv}
         />
       </ResourcePageHeading>
+      <FavoritesBar clusterName={clusterName} type="consumerGroup" />
       <ControlPanelWrapper hasInput>
         <Search
           key={clusterName}

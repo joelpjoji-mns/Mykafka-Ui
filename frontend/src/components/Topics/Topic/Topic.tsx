@@ -59,6 +59,8 @@ import { useProduceMessage } from 'lib/hooks/useProduceMessage';
 import ResourcePageHeading from 'components/common/ResourcePageHeading/ResourcePageHeading';
 import { TopicActionsProvider } from 'components/contexts/TopicActionsContext';
 import { showServerError } from 'lib/errorHandling';
+import FavoriteToggle from 'components/common/FavoriteToggle/FavoriteToggle';
+import { useRecordVisit } from 'lib/hooks/useFavorites';
 
 const loadErrorPage = () => import('components/ErrorPage/ErrorPage');
 const loadMessages = () => import('./Messages/Messages');
@@ -101,6 +103,7 @@ const Topic: React.FC = () => {
   const { messageData, setMessage, clearMessage } = useProduceMessage();
 
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
+  useRecordVisit(clusterName, 'topic', topicName);
   const queryClient = useQueryClient();
   const { pathname, search } = useLocation();
   const [searchParams] = useSearchParams();
@@ -215,6 +218,13 @@ const Topic: React.FC = () => {
         backText="Topics"
         backTo={clusterTopicsPath(clusterName)}
         documentTitle={getTopicPageTitle(pathname, clusterName, topicName)}
+        headingAddon={
+          <FavoriteToggle
+            clusterName={clusterName}
+            type="topic"
+            name={topicName}
+          />
+        }
       >
         <ActionButton
           buttonSize="M"

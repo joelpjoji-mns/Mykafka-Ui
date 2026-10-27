@@ -25,6 +25,7 @@ import {
   useTopicDetails,
   useTopicConnectors,
 } from 'lib/hooks/api/topics';
+import { useFavoritesStore } from 'lib/hooks/useFavorites';
 
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({
@@ -320,6 +321,42 @@ describe('Details', () => {
       await userEvent.click(screen.getByRole('link', { name: 'Settings' }));
       expect(await screen.findByText('SettingsMock')).toBeInTheDocument();
       expect(screen.getByText('MessagesMock')).toBeInTheDocument();
+    });
+  });
+
+  describe('Favorites', () => {
+    beforeEach(() => {
+      localStorage.clear();
+      useFavoritesStore.setState({ clusters: {} });
+    });
+
+    it('records a visit for the topic', () => {
+      renderComponent();
+
+      expect(
+        useFavoritesStore.getState().clusters[mockClusterName].recents
+      ).toEqual([{ type: 'topic', name: topic.name }]);
+    });
+
+    it('renders a favorite toggle next to the topic heading', async () => {
+      renderComponent();
+
+      const heading = screen.getByRole('heading', { name: topic.name });
+      const toggle = screen.getByRole('button', {
+        name: `Add ${topic.name} to favorites`,
+      });
+      expect(heading.parentElement).toContainElement(toggle);
+
+      await userEvent.click(toggle);
+
+      expect(
+        screen.getByRole('button', {
+          name: `Remove ${topic.name} from favorites`,
+        })
+      ).toHaveAttribute('aria-pressed', 'true');
+      expect(
+        useFavoritesStore.getState().clusters[mockClusterName].favorites
+      ).toEqual([{ type: 'topic', name: topic.name }]);
     });
   });
 });

@@ -184,6 +184,19 @@ new arrivals shifting them. Arrivals are buffered (bounded by the message limit)
 **Resume live (N new)** prepends them and continues tailing. Changing filters starts
 a fresh, unpaused stream.
 
+From any message's actions menu, **Select for compare** marks up to two messages
+(a third replaces the oldest). **Compare messages** then shows their metadata side by
+side, highlighting differences, plus a diff of the value, key or headers. JSON is
+pretty-printed and headers are compared regardless of order. **View surrounding
+messages** opens the 25 records before and after that message in its partition, with
+the message highlighted; text and smart filters are cleared so neighbours are visible.
+
+Star (☆) topics and consumer groups from their page heading or list row to add them to
+**Favorites**, shown as quick links above the Topics and Consumers lists. With an empty
+query, the **Ctrl/Cmd+K** palette lists Favorites and the last 8 **Recently visited**
+topics and groups for the current cluster, navigable with the arrow keys and Enter.
+Favorites and recents are stored per cluster in the browser's local storage.
+
 ### Performance And Caching
 
 - HTTP responses (JSON, NDJSON, CSV, JS, CSS, HTML, SVG) are gzip-compressed above 2 KB.

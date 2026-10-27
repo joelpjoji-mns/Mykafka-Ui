@@ -1,13 +1,20 @@
 import React from 'react';
-import { screen } from '@testing-library/react';
-import { render } from 'lib/testHelpers';
+import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { render, WithRoute } from 'lib/testHelpers';
 import {
   useConsumerGroups,
   useGetConsumerGroupsLag,
 } from 'lib/hooks/api/consumers';
 import List from 'components/ConsumerGroups/List';
+import { useFavoritesStore } from 'lib/hooks/useFavorites';
+import {
+  clusterConsumerGroupDetailsPath,
+  clusterConsumerGroupsPath,
+} from 'lib/paths';
 
 const mockSearchParams = new URLSearchParams();
+const mockNavigate = jest.fn();
 
 // Mock hooks
 jest.mock('lib/hooks/api/consumers', () => ({
@@ -18,7 +25,7 @@ jest.mock('lib/hooks/api/consumers', () => ({
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
   useSearchParams: () => [mockSearchParams, jest.fn()],
-  useNavigate: () => jest.fn(),
+  useNavigate: () => mockNavigate,
 }));
 
 const mockUseConsumerGroups = useConsumerGroups as jest.Mock;
@@ -26,6 +33,8 @@ const mockUseConsumerGroupsLag = useGetConsumerGroupsLag as jest.Mock;
 
 describe('ConsumerGroups List', () => {
   beforeEach(() => {
+    localStorage.clear();
+    useFavoritesStore.setState({ clusters: {} });
     mockSearchParams.delete('q');
     mockUseConsumerGroups.mockClear();
     mockUseConsumerGroups.mockImplementation(() => ({
@@ -80,6 +89,41 @@ describe('ConsumerGroups List', () => {
     ).toHaveValue('abcd, uhdg');
     expect(mockUseConsumerGroups).toHaveBeenCalledWith(
       expect.objectContaining({ search: 'abcd, uhdg' })
+    );
+  });
+
+  it('favorites a group from its row without navigating and lists it in the favorites row', async () => {
+    render(
+      <WithRoute path={clusterConsumerGroupsPath()}>
+        <List />
+      </WithRoute>,
+      { initialEntries: [clusterConsumerGroupsPath('local')] }
+    );
+    expect(
+      screen.queryByRole('navigation', { name: 'Favorite consumer groups' })
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add group1 to favorites' })
+    );
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('button', { name: 'Remove group1 from favorites' })
+    ).toHaveAttribute('aria-pressed', 'true');
+    const favorites = screen.getByRole('navigation', {
+      name: 'Favorite consumer groups',
+    });
+    expect(
+      within(favorites).getByRole('link', { name: 'group1' })
+    ).toHaveAttribute(
+      'href',
+      clusterConsumerGroupDetailsPath('local', 'group1')
+    );
+
+    await userEvent.click(screen.getAllByRole('row')[2]);
+    expect(mockNavigate).toHaveBeenCalledWith(
+      clusterConsumerGroupDetailsPath('local', 'group2')
     );
   });
 });

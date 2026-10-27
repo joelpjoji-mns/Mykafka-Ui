@@ -1,5 +1,5 @@
 import React from 'react';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, WithRoute } from 'lib/testHelpers';
 import CommandPalette from 'components/common/CommandPalette/CommandPalette';
@@ -11,7 +11,8 @@ import { useTopics } from 'lib/hooks/api/topics';
 import { useConsumerGroups } from 'lib/hooks/api/consumers';
 import { useGetSchemas } from 'lib/hooks/api/schemas';
 import { useConnectors } from 'lib/hooks/api/kafkaConnect';
-import { clusterTopicPath } from 'lib/paths';
+import { clusterConsumerGroupDetailsPath, clusterTopicPath } from 'lib/paths';
+import { useFavoritesStore } from 'lib/hooks/useFavorites';
 
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({
@@ -51,6 +52,8 @@ const openPalette = () => {
 describe('CommandPalette', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    localStorage.clear();
+    useFavoritesStore.setState({ clusters: {} });
     (useTopics as jest.Mock).mockReturnValue({
       data: { topics: [{ name: 'orders-topic' }] },
       isFetching: false,
@@ -160,5 +163,123 @@ describe('CommandPalette', () => {
         screen.queryByLabelText('Command palette search')
       ).not.toBeInTheDocument()
     );
+  });
+
+  describe('when the query is empty', () => {
+    const seedFavoritesAndRecents = () => {
+      const { toggleFavorite, recordVisit } = useFavoritesStore.getState();
+      toggleFavorite(clusterName, { type: 'topic', name: 'fav-topic' });
+      toggleFavorite(clusterName, { type: 'consumerGroup', name: 'fav-group' });
+      recordVisit(clusterName, { type: 'topic', name: 'old-topic' });
+      recordVisit(clusterName, { type: 'topic', name: 'fav-topic' });
+      recordVisit(clusterName, { type: 'consumerGroup', name: 'recent-group' });
+      toggleFavorite('other-cluster', { type: 'topic', name: 'foreign-topic' });
+    };
+
+    it('shows the hint when there are no favorites or recents', () => {
+      renderComponent();
+      openPalette();
+
+      expect(
+        screen.getByText(
+          'Type to search across this cluster. Press Esc to close.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    });
+
+    it('lists favorites and recently visited items of the current cluster', () => {
+      seedFavoritesAndRecents();
+      renderComponent();
+      openPalette();
+
+      expect(
+        screen.queryByText(
+          'Type to search across this cluster. Press Esc to close.'
+        )
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('listbox', { name: 'Favorites and recently visited' })
+      ).toBeInTheDocument();
+
+      const favorites = screen.getByRole('group', { name: 'Favorites' });
+      expect(
+        within(favorites)
+          .getAllByRole('option')
+          .map((option) => option.textContent)
+      ).toEqual(['Topicfav-topic', 'Consumer groupfav-group']);
+
+      const recents = screen.getByRole('group', { name: 'Recently visited' });
+      // Favorited items are not repeated in the recents section.
+      expect(
+        within(recents)
+          .getAllByRole('option')
+          .map((option) => option.textContent)
+      ).toEqual(['Consumer grouprecent-group', 'Topicold-topic']);
+
+      expect(screen.queryByText('foreign-topic')).not.toBeInTheDocument();
+      expect(useTopics).not.toHaveBeenCalled();
+    });
+
+    it('supports keyboard navigation across both sections', async () => {
+      seedFavoritesAndRecents();
+      renderComponent();
+      openPalette();
+
+      const isSelected = (name: string) =>
+        screen
+          .getByRole('option', { name: new RegExp(name) })
+          .getAttribute('aria-selected');
+
+      expect(isSelected('fav-topic')).toBe('true');
+
+      await userEvent.keyboard('{ArrowDown}{ArrowDown}');
+      expect(isSelected('fav-topic')).toBe('false');
+      expect(isSelected('recent-group')).toBe('true');
+
+      await userEvent.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}');
+      expect(isSelected('old-topic')).toBe('true');
+
+      await userEvent.keyboard('{ArrowUp}{ArrowUp}');
+      expect(isSelected('fav-group')).toBe('true');
+
+      await userEvent.keyboard('{Enter}');
+      expect(mockNavigate).toHaveBeenCalledWith(
+        clusterConsumerGroupDetailsPath(clusterName, 'fav-group')
+      );
+      expect(
+        screen.queryByLabelText('Command palette search')
+      ).not.toBeInTheDocument();
+    });
+
+    it('navigates to a recent item on click', async () => {
+      seedFavoritesAndRecents();
+      renderComponent();
+      openPalette();
+
+      await userEvent.click(screen.getByText('old-topic'));
+      expect(mockNavigate).toHaveBeenCalledWith(
+        clusterTopicPath(clusterName, 'old-topic')
+      );
+    });
+
+    it('switches back to favorites when the search query is cleared', async () => {
+      seedFavoritesAndRecents();
+      renderComponent();
+      openPalette();
+
+      const input = screen.getByLabelText('Command palette search');
+      await userEvent.type(input, 'orders');
+      expect(await screen.findByText('orders-topic')).toBeInTheDocument();
+      expect(screen.queryByText('fav-topic')).not.toBeInTheDocument();
+
+      await userEvent.clear(input);
+      expect(await screen.findByText('fav-topic')).toBeInTheDocument();
+
+      await userEvent.keyboard('{Enter}');
+      expect(mockNavigate).toHaveBeenCalledWith(
+        clusterTopicPath(clusterName, 'fav-topic')
+      );
+    });
   });
 });

@@ -66,8 +66,28 @@ const liveMessageArrival = (backgroundColor: string) => keyframes`
   }
 `;
 
-export const ClickableRow = styled.tr<{ $isLiveArrival?: boolean }>`
+export const ClickableRow = styled.tr<{
+  $isLiveArrival?: boolean;
+  $isSelected?: boolean;
+  $isAnchor?: boolean;
+}>`
   cursor: pointer;
+
+  ${({ $isAnchor, theme }) =>
+    $isAnchor &&
+    css`
+      & > td {
+        background-color: ${theme.table.tr.backgroundColor.hover};
+      }
+    `}
+
+  ${({ $isSelected, theme }) =>
+    $isSelected &&
+    css`
+      & > td:first-child {
+        box-shadow: inset 4px 0 0 ${theme.table.th.color.active};
+      }
+    `}
 
   ${({ $isLiveArrival, theme }) =>
     $isLiveArrival &&
@@ -125,9 +145,9 @@ export const MetadataMeta = styled.p`
 
 export const Tab = styled.button<{ $active?: boolean }>(
   ({ theme, $active }) => css`
-    background-color: ${theme.secondaryTab.backgroundColor[
-      $active ? 'active' : 'normal'
-    ]};
+    background-color: ${
+      theme.secondaryTab.backgroundColor[$active ? 'active' : 'normal']
+    };
     color: ${theme.secondaryTab.color[$active ? 'active' : 'normal']};
     padding: 6px 16px;
     height: 32px;

@@ -83,6 +83,31 @@ describe('Topics hooks', () => {
       renderQueryHook(() => hooks.useTopicAnalysis(topicParams, false));
       expect(mock.calls()).toHaveLength(0);
     });
+    it('polls only while the analysis is in progress', async () => {
+      let calls = 0;
+      const mock = fetchMock.get(`${topicPath}/analysis`, () => {
+        calls += 1;
+        return calls === 1
+          ? { progress: { completenessPercent: 50 } }
+          : { result: { totalStats: {} } };
+      });
+      const { result } = renderQueryHook(() =>
+        hooks.useTopicAnalysis(topicParams)
+      );
+
+      await waitFor(
+        () =>
+          expect(result.current.data).toEqual(
+            expect.objectContaining({ result: expect.anything() })
+          ),
+        { timeout: 3_000 }
+      );
+      expect(mock.calls()).toHaveLength(2);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 1_200);
+      });
+      expect(mock.calls()).toHaveLength(2);
+    });
   });
 
   describe('mutatations', () => {

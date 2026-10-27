@@ -179,6 +179,29 @@ cancels its request. Waiting never pauses or removes consumers. Cancellation can
 undo a reset already applied if the group became inactive concurrently. Reverse
 proxies must permit long-running requests for indefinite waiting.
 
+While live tailing, **Pause live** freezes the table so rows can be inspected without
+new arrivals shifting them. Arrivals are buffered (bounded by the message limit) and
+**Resume live (N new)** prepends them and continues tailing. Changing filters starts
+a fresh, unpaused stream.
+
+### Performance And Caching
+
+- HTTP responses (JSON, NDJSON, CSV, JS, CSS, HTML, SVG) are gzip-compressed above 2 KB.
+  Server-sent event streams are never compressed so live messages are not buffered.
+  Disable with `KAFBAT_UI_HTTP_COMPRESSION_ENABLED=false`.
+- Content-hashed frontend assets under `/assets` are served with
+  `Cache-Control: public, max-age=31536000, immutable`; `index.html` and
+  `manifest.json` use `no-cache` so new releases load immediately.
+- Short-lived server caches avoid repeating expensive Kafka work: recent-record samples
+  used by Record Explorer and Data Profile (15 s, 64 MB cap), Developer Hub insights
+  (15 s per topic) and Audit Explorer topic reads (10 s). Audit pagination keeps one
+  result snapshot per query, so many users can page concurrently.
+- The browser caches rarely changing data (app info, auth settings, latest release)
+  and sampling-heavy views (Record Explorer, Data Profile, Developer Hub) instead of
+  refetching them on every visit; explicit refresh actions still fetch fresh data.
+- Uploaded messages are produced in pipelined batches. ZIP uploads are limited to
+  64 MB per uncompressed entry, 256 MB total and 100,000 entries.
+
 Topic-based application-consumer pause/resume and cooperative active-group offset
 reset have been removed. Consumer details no longer probe or create control topics.
 Kafka Admin APIs cannot remotely pause an arbitrary application consumer. A future

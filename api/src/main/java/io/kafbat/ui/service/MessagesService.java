@@ -56,10 +56,13 @@ import java.util.PriorityQueue;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -96,6 +99,10 @@ public class MessagesService {
   private static final int DEFAULT_PAGE_SIZE = 1_000;
   private static final int DEFAULT_UPLOAD_MESSAGE_LIMIT = 1_000;
   private static final int MAX_UPLOAD_MESSAGE_LIMIT = 10_000;
+  static final int MAX_UPLOAD_ZIP_ENTRY_BYTES = 64 * 1024 * 1024;
+  static final long MAX_UPLOAD_ZIP_TOTAL_BYTES = 256L * 1024 * 1024;
+  static final int MAX_UPLOAD_ZIP_ENTRIES = 100_000;
+  private static final Pattern WHITESPACE = Pattern.compile("\\s+");
   private static final int MAX_PRODUCER_REQUEST_BYTES = 16 * 1024 * 1024;
   private static final long MAX_PRODUCER_BUFFER_BYTES = 64L * 1024 * 1024;
   private static final int SORTED_SCAN_FIRST_PREVIEW_SIZE = 1_000;
@@ -931,8 +938,7 @@ public class MessagesService {
           Comparator.nullsFirst(Comparator.naturalOrder()));
       case "value" -> Comparator.comparing(TopicMessageDTO::getValue,
           Comparator.nullsFirst(Comparator.naturalOrder()));
-      case "headers" -> Comparator.comparing(message ->
-          OBJECT_MAPPER.valueToTree(Optional.ofNullable(message.getHeaders()).orElse(Map.of())).toString());
+      case "headers" -> Comparator.comparing(MessagesService::headersSortKey);
       default -> throw new ValidationException("Unsupported sorting column: " + column);
     };
     order = order.thenComparingInt(TopicMessageDTO::getPartition).thenComparingLong(TopicMessageDTO::getOffset);
@@ -941,6 +947,19 @@ public class MessagesService {
       case "DESC" -> order.reversed();
       default -> throw new ValidationException("Unsupported sort order: " + direction);
     };
+  }
+
+  private static String headersSortKey(TopicMessageDTO message) {
+    Map<String, String> headers = message.getHeaders();
+    if (headers == null || headers.isEmpty()) {
+      return "{}";
+    }
+    try {
+      // Serializing directly is much cheaper than building a JsonNode tree on every comparison.
+      return OBJECT_MAPPER.writeValueAsString(headers);
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("Failed to build headers sort key", e);
+    }
   }
 
   private Flux<TopicMessageEventDTO> loadMessagesFromPosition(
@@ -1390,10 +1409,6 @@ public class MessagesService {
     return new DownloadSettings(defaultDownloadLimit, maxPageSize);
   }
 
-  public String downloadFileName(String topic, int limit) {
-    return safeZipName(topic) + "-last-" + limit + "-messages.zip";
-  }
-
   public String downloadFileName(
       String topic, int limit, PollingModeDTO mode, DownloadFormat format) {
     String base = safeZipName(topic) + "-" + mode.name().toLowerCase(Locale.ROOT) + "-" + limit;
@@ -1550,9 +1565,11 @@ public class MessagesService {
               + messageLimit);
     }
 
+    List<Integer> targetPartitions = uploadTargetPartitions(topicDescription, options);
+    Map<String, String> baseHeaders = parseUploadHeaders(options.headersJson());
     List<String> errors = new ArrayList<>();
     List<UploadMessagePreview> previews =
-        previews(topicDescription, parsedUpload.candidates(), options);
+        previews(targetPartitions, parsedUpload.candidates(), options);
     int produced = 0;
 
     if (!options.dryRun()) {
@@ -1566,24 +1583,42 @@ public class MessagesService {
               Map.of());
 
       try (KafkaProducer<byte[], byte[]> producer = createProducer(cluster, Map.of())) {
+        // Send everything first so records are batched and pipelined, then await acknowledgements.
+        List<PendingUpload> pending = new ArrayList<>(parsedUpload.candidates().size());
         int index = 0;
         for (UploadCandidate candidate : parsedUpload.candidates()) {
           try {
-            Integer partition = resolveUploadPartition(topicDescription, options, index);
-            producer
-                .send(
+            Integer partition = resolveUploadPartition(targetPartitions, options, index);
+            pending.add(new PendingUpload(
+                candidate,
+                producer.send(
                     producerRecordCreator.create(
                         topicDescription.name(),
                         partition,
                         candidate.key(),
                         candidate.value(),
-                        uploadHeaders(candidate, options, index)))
-                .get();
-            produced++;
+                        uploadHeaders(candidate, baseHeaders, options, index))),
+                null));
           } catch (Exception e) {
-            errors.add(candidate.entryName() + ": " + e.getMessage());
+            pending.add(new PendingUpload(candidate, null, e.getMessage()));
           }
           index++;
+        }
+        producer.flush();
+        for (PendingUpload upload : pending) {
+          if (upload.future() == null) {
+            errors.add(upload.candidate().entryName() + ": " + upload.error());
+            continue;
+          }
+          try {
+            upload.future().get();
+            produced++;
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            errors.add(upload.candidate().entryName() + ": " + e.getMessage());
+          } catch (ExecutionException e) {
+            errors.add(upload.candidate().entryName() + ": " + e.getMessage());
+          }
         }
       }
     }
@@ -1599,6 +1634,11 @@ public class MessagesService {
         previews,
         errors);
   }
+
+  private record PendingUpload(
+      UploadCandidate candidate,
+      @Nullable Future<RecordMetadata> future,
+      @Nullable String error) {}
 
   private record ParsedUpload(
       List<UploadCandidate> candidates,
@@ -1634,13 +1674,31 @@ public class MessagesService {
     }
 
     List<UploadSourceFile> entries = new ArrayList<>();
+    long totalBytes = 0;
     try (ZipInputStream zipInputStream =
         new ZipInputStream(new ByteArrayInputStream(file.content()), StandardCharsets.UTF_8)) {
       for (ZipEntry entry = zipInputStream.getNextEntry();
           entry != null;
           entry = zipInputStream.getNextEntry()) {
         if (!entry.isDirectory()) {
-          entries.add(new UploadSourceFile(entry.getName(), zipInputStream.readAllBytes()));
+          if (entries.size() >= MAX_UPLOAD_ZIP_ENTRIES) {
+            throw new ValidationException(
+                "ZIP file " + file.fileName() + " has more than " + MAX_UPLOAD_ZIP_ENTRIES + " entries");
+          }
+          // Bounded reads protect the heap from highly compressed archives (zip bombs).
+          byte[] content = zipInputStream.readNBytes(MAX_UPLOAD_ZIP_ENTRY_BYTES + 1);
+          if (content.length > MAX_UPLOAD_ZIP_ENTRY_BYTES) {
+            throw new ValidationException(
+                "ZIP entry " + entry.getName() + " exceeds the maximum uncompressed size of "
+                    + MAX_UPLOAD_ZIP_ENTRY_BYTES / (1024 * 1024) + " MB");
+          }
+          totalBytes += content.length;
+          if (totalBytes > MAX_UPLOAD_ZIP_TOTAL_BYTES) {
+            throw new ValidationException(
+                "ZIP file " + file.fileName() + " exceeds the maximum uncompressed size of "
+                    + MAX_UPLOAD_ZIP_TOTAL_BYTES / (1024 * 1024) + " MB");
+          }
+          entries.add(new UploadSourceFile(entry.getName(), content));
         }
         zipInputStream.closeEntry();
       }
@@ -1716,7 +1774,7 @@ public class MessagesService {
   }
 
   private List<UploadMessagePreview> previews(
-      TopicDescription topicDescription,
+      List<Integer> targetPartitions,
       List<UploadCandidate> candidates,
       UploadMessagesOptions options) {
     List<UploadMessagePreview> previews = new ArrayList<>();
@@ -1727,7 +1785,7 @@ public class MessagesService {
           new UploadMessagePreview(
               candidate.sourceFile(),
               candidate.entryName(),
-              resolveUploadPartition(topicDescription, options, i),
+              resolveUploadPartition(targetPartitions, options, i),
               candidate.key(),
               candidate.value().getBytes(StandardCharsets.UTF_8).length,
               preview(candidate.value())));
@@ -1736,7 +1794,7 @@ public class MessagesService {
   }
 
   private String preview(String value) {
-    String normalized = value.replaceAll("\\s+", " ").trim();
+    String normalized = WHITESPACE.matcher(value).replaceAll(" ").trim();
     return normalized.length() <= 240 ? normalized : normalized.substring(0, 240) + "…";
   }
 
@@ -1749,8 +1807,8 @@ public class MessagesService {
   }
 
   private Map<String, String> uploadHeaders(
-      UploadCandidate candidate, UploadMessagesOptions options, int index) {
-    Map<String, String> headers = new LinkedHashMap<>(parseUploadHeaders(options.headersJson()));
+      UploadCandidate candidate, Map<String, String> baseHeaders, UploadMessagesOptions options, int index) {
+    Map<String, String> headers = new LinkedHashMap<>(baseHeaders);
     if (options.includeMetadataHeaders()) {
       headers.put("kafbat-upload-file", candidate.sourceFile());
       headers.put("kafbat-upload-entry", candidate.entryName());
@@ -1778,8 +1836,7 @@ public class MessagesService {
   }
 
   private Integer resolveUploadPartition(
-      TopicDescription topicDescription, UploadMessagesOptions options, int messageIndex) {
-    List<Integer> partitions = uploadTargetPartitions(topicDescription, options);
+      List<Integer> partitions, UploadMessagesOptions options, int messageIndex) {
     return switch (options.partitionStrategy()) {
       case ANY -> null;
       case SELECTED -> options.selectedPartition();

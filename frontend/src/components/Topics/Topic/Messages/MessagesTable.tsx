@@ -5,7 +5,13 @@ import {
   TopicMessage,
   TopicMessageConsuming,
 } from 'generated-sources';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Button } from 'components/common/Button/Button';
 import { usePaginateTopics, useIsLiveMode } from 'lib/hooks/useMessagesFilters';
 import { useMessageFiltersStore } from 'lib/hooks/useMessageFiltersStore';
@@ -14,6 +20,7 @@ import { RouteParamsClusterTopic } from 'lib/paths';
 import { useLocalStorage } from 'lib/hooks/useLocalStorage';
 import { useSearchParams } from 'react-router-dom';
 import { MessagesFilterKeys } from 'lib/constants';
+import { uniqueKeys } from 'lib/utils/uniqueKeys';
 
 import Message, { PreviewFilter } from './Message';
 import PreviewModal from './PreviewModal';
@@ -26,6 +33,10 @@ export interface MessagesTableProps {
   animateLiveArrivals?: boolean;
   abortFetchData?: () => void;
   consumptionStats?: TopicMessageConsuming;
+  isLivePaused?: boolean;
+  pausedArrivals?: number;
+  onPauseLive?: () => void;
+  onResumeLive?: () => void;
 }
 
 type PreviewTarget = 'key' | 'headers' | 'content';
@@ -115,8 +126,29 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
   animateLiveArrivals = false,
   abortFetchData,
   consumptionStats,
+  isLivePaused = false,
+  pausedArrivals = 0,
+  onPauseLive,
+  onResumeLive,
 }) => {
   const [params, setParams] = useSearchParams();
+  // Keep the same array across URL changes that don't touch the search so
+  // memoized rows don't re-render.
+  const searchTermsKey = JSON.stringify(
+    params.getAll(MessagesFilterKeys.stringFilter)
+  );
+  const searchTerms = useMemo<string[]>(
+    () => JSON.parse(searchTermsKey),
+    [searchTermsKey]
+  );
+  // Partition and offset identify a record without relying on its content.
+  const messageRowKeys = useMemo(
+    () =>
+      uniqueKeys(
+        messages.map(({ partition, offset }) => `${partition}-${offset}`)
+      ),
+    [messages]
+  );
   const wholeTopic = params.has('orderBy');
   const [cancelled, setCancelled] = useState(false);
   const scanning =
@@ -412,6 +444,23 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
               Cancel topic scan
             </Button>
           )}
+          {isLive && animateLiveArrivals && onPauseLive && onResumeLive && (
+            <Button
+              buttonType="secondary"
+              buttonSize="M"
+              aria-pressed={isLivePaused}
+              title={
+                isLivePaused
+                  ? 'Show messages that arrived while paused and continue tailing'
+                  : 'Freeze the table so rows can be inspected; new arrivals are buffered'
+              }
+              onClick={isLivePaused ? onResumeLive : onPauseLive}
+            >
+              {isLivePaused
+                ? `Resume live${pausedArrivals > 0 ? ` (${pausedArrivals} new)` : ''}`
+                : 'Pause live'}
+            </Button>
+          )}
           <Button
             disabled={isLive || isFetching || !nextCursor}
             title={
@@ -508,19 +557,15 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
           </thead>
           <tbody>
             {!cancelled &&
-              messages.map((message: TopicMessage) => (
+              messages.map((message: TopicMessage, index) => (
                 <Message
-                  key={[
-                    message.offset,
-                    message.timestamp,
-                    message.key,
-                    message.partition,
-                  ].join('-')}
+                  key={messageRowKeys[index]}
                   message={message}
                   keyFilters={keyFilters}
                   headersFilters={headersFilters}
                   contentFilters={contentFilters}
                   isLiveArrival={isLive && animateLiveArrivals}
+                  searchTerms={searchTerms}
                 />
               ))}
             {!cancelled && isFetching && !messages.length && (

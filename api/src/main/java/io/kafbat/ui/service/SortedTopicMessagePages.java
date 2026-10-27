@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.Deflater;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -31,7 +32,13 @@ public class SortedTopicMessagePages implements AutoCloseable {
   private static final int CACHE_EXPIRY_MINUTES = 30;
 
   private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+  // Bytes held by writers that are still scanning. Shared so concurrent sorted scans cannot each
+  // buffer MAX_CACHE_WEIGHT on the heap before their results are handed to the bounded cache.
+  private final AtomicLong inFlightWeight = new AtomicLong();
+  // A single segment keeps the full weight budget available to one scan; Guava otherwise divides
+  // maximumWeight across segments and silently evicts any scan larger than one segment's share.
   private final Cache<String, SortedScan> scans = CacheBuilder.newBuilder()
+      .concurrencyLevel(1)
       .maximumWeight(MAX_CACHE_WEIGHT)
       .weigher((String scanId, SortedScan scan) ->
           (int) Math.min(scan.cacheWeight(), MAX_CACHE_WEIGHT))
@@ -84,10 +91,6 @@ public class SortedTopicMessagePages implements AutoCloseable {
   public void close() {
     cursors.invalidateAll();
     scans.invalidateAll();
-  }
-
-  private String registerCursor(String scanId, int nextIndex) {
-    return registerCursor(scanId, nextIndex, 1);
   }
 
   private String registerCursor(String scanId, int nextIndex, int pageNumber) {
@@ -175,7 +178,7 @@ public class SortedTopicMessagePages implements AutoCloseable {
     private final PriorityQueue<SizeReference> previewReferences;
     private long cacheWeight;
     private boolean paginationAvailable = true;
-    private boolean finished;
+    private boolean closed;
 
     private Writer(boolean descending, int previewLimit) {
       this.previewLimit = Math.max(1, previewLimit);
@@ -185,12 +188,12 @@ public class SortedTopicMessagePages implements AutoCloseable {
           new PriorityQueue<>(this.previewLimit, previewOrder.reversed());
     }
 
-    public boolean hasMessages() {
+    public synchronized boolean hasMessages() {
       return paginationAvailable && !references.isEmpty();
     }
 
-    public void append(TopicMessageDTO message) {
-      if (!paginationAvailable) {
+    public synchronized void append(TopicMessageDTO message) {
+      if (!paginationAvailable || closed) {
         return;
       }
       if (references.size() >= MAX_CACHED_MESSAGES) {
@@ -201,6 +204,11 @@ public class SortedTopicMessagePages implements AutoCloseable {
       byte[] compressed = compressMessage(message);
       long weight = compressed.length + 32L;
       if (cacheWeight + weight > MAX_CACHE_WEIGHT) {
+        disablePagination();
+        return;
+      }
+      if (inFlightWeight.addAndGet(weight) > MAX_CACHE_WEIGHT) {
+        inFlightWeight.addAndGet(-weight);
         disablePagination();
         return;
       }
@@ -222,7 +230,7 @@ public class SortedTopicMessagePages implements AutoCloseable {
       cacheWeight += weight;
     }
 
-    public List<TopicMessageDTO> preview(int limit, long byteBudget, boolean descending) {
+    public synchronized List<TopicMessageDTO> preview(int limit, long byteBudget, boolean descending) {
       if (!paginationAvailable) {
         return List.of();
       }
@@ -239,9 +247,8 @@ public class SortedTopicMessagePages implements AutoCloseable {
       return messages;
     }
 
-    public Page finish(
+    public synchronized Page finish(
         String clusterName, String topicName, String signature, int pageSize, boolean descending) {
-      finished = true;
       if (!paginationAvailable) {
         clear();
         throw new ValidationException(
@@ -288,10 +295,11 @@ public class SortedTopicMessagePages implements AutoCloseable {
     }
 
     @Override
-    public void close() {
-      if (!finished) {
-        clear();
-      }
+    public synchronized void close() {
+      // Always release: finish() may have thrown before clearing, and clear() is idempotent
+      // (cached scans hold their own copies of the lists).
+      closed = true;
+      clear();
     }
 
     private void disablePagination() {
@@ -303,6 +311,7 @@ public class SortedTopicMessagePages implements AutoCloseable {
       references.clear();
       compressedMessages.clear();
       previewReferences.clear();
+      inFlightWeight.addAndGet(-cacheWeight);
       cacheWeight = 0;
     }
   }

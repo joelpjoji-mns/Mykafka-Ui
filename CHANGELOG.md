@@ -27,6 +27,14 @@ This file describes the release policy and the durable product milestones. The G
 - Added history-first, gap-free live message tailing with new messages prepended above the current view.
 - Added safe consumer offset reset previews and inactive-group protection.
 - Added topic download/upload, Developer Hub, Operations Center, Topic Governance, Audit Explorer, Record Explorer, and refined Glass/AMOLED themes.
+- Added **Pause live / Resume live** for live tailing, buffering arrivals while paused.
+
+### Performance and reliability
+
+- Enabled HTTP response compression and long-lived immutable caching for hashed frontend assets.
+- Added short-lived caches for record sampling, Developer Hub insights and audit topic reads; tuned client-side caching and polling.
+- Pipelined message uploads, bounded ZIP extraction, and shared a global memory budget across concurrent size-sorted scans (fixing scans over 128 MB being evicted immediately).
+- Fixed offset resets for unknown partitions (500 → validation error), audit pages failing on tombstones or expiring under concurrent use, one bad topic failing Record Explorer, blank consumer lag between polls, sorted-page cursor drift after browser navigation, shared search links being overridden by saved drafts, Auto theme ignoring OS changes, and malformed schemas crashing the diff view.
 
 ## Historical Context
 

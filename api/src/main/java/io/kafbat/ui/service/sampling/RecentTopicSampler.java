@@ -1,5 +1,7 @@
 package io.kafbat.ui.service.sampling;
 
+import com.github.benmanes.caffeine.cache.AsyncCache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.kafbat.ui.emitter.EnhancedConsumer;
 import io.kafbat.ui.model.KafkaCluster;
 import io.kafbat.ui.service.ConsumerGroupService;
@@ -23,15 +25,45 @@ import reactor.core.scheduler.Schedulers;
 public class RecentTopicSampler {
   private static final int MAX_EMPTY_POLLS = 3;
   private static final Duration POLL_TIMEOUT = Duration.ofMillis(500);
+  private static final Duration SAMPLE_CACHE_TTL = Duration.ofSeconds(15);
+  private static final long SAMPLE_CACHE_MAX_BYTES = 64L * 1024 * 1024;
+  private static final int RECORD_OVERHEAD_BYTES = 128;
 
   private final ConsumerGroupService consumerGroupService;
 
+  // Record Explorer, Data Profile and repeated refreshes sample the same recent records; sharing
+  // them briefly avoids opening a new Kafka consumer and re-polling for every request.
+  private final AsyncCache<SampleKey, Sample> samples = Caffeine.newBuilder()
+      .expireAfterWrite(SAMPLE_CACHE_TTL)
+      .maximumWeight(SAMPLE_CACHE_MAX_BYTES)
+      .weigher((SampleKey key, Sample sample) -> sample.weight())
+      .buildAsync();
+
   public record Sample(List<ConsumerRecord<Bytes, Bytes>> records, int totalPartitions) {
+
+    int weight() {
+      long bytes = 0;
+      for (ConsumerRecord<Bytes, Bytes> record : records) {
+        bytes += Math.max(0, record.serializedKeySize())
+            + Math.max(0, record.serializedValueSize())
+            + RECORD_OVERHEAD_BYTES;
+      }
+      return (int) Math.min(Integer.MAX_VALUE, bytes);
+    }
+  }
+
+  private record SampleKey(String clusterName, String topicName, int sampleLimit) {
   }
 
   public Mono<Sample> sample(KafkaCluster cluster, String topicName, int sampleLimit) {
-    return Mono.fromCallable(() -> sampleBlocking(cluster, topicName, sampleLimit))
-        .subscribeOn(Schedulers.boundedElastic());
+    SampleKey key = new SampleKey(cluster.getName(), topicName, sampleLimit);
+    // suppressCancel: one cancelled subscriber must not cancel the shared, cached sampling future.
+    return Mono.fromFuture(
+        () -> samples.get(key, (ignored, executor) ->
+            Mono.fromCallable(() -> sampleBlocking(cluster, topicName, sampleLimit))
+                .subscribeOn(Schedulers.boundedElastic())
+                .toFuture()),
+        true);
   }
 
   private Sample sampleBlocking(KafkaCluster cluster, String topicName, int sampleLimit) {
@@ -59,7 +91,7 @@ public class RecentTopicSampler {
       consumer.assign(remainingByPartition.keySet());
       seekRecentSamples(consumer, beginOffsets, endOffsets, remainingByPartition);
       return new Sample(
-          pollSamples(consumer, remainingByPartition, sampleLimit),
+          pollSamples(consumer, remainingByPartition, endOffsets, sampleLimit),
           partitions.size());
     }
   }
@@ -97,6 +129,7 @@ public class RecentTopicSampler {
   private List<ConsumerRecord<Bytes, Bytes>> pollSamples(
       EnhancedConsumer consumer,
       Map<TopicPartition, Integer> remainingByPartition,
+      Map<TopicPartition, Long> endOffsets,
       int sampleLimit) {
     List<ConsumerRecord<Bytes, Bytes>> records = new ArrayList<>();
     int emptyPolls = 0;
@@ -121,6 +154,10 @@ public class RecentTopicSampler {
           return List.copyOf(records);
         }
       }
+      // Compacted topics and transaction markers leave fewer records than the offset range
+      // suggests; stop waiting on partitions that already reached their end offset.
+      remainingByPartition.keySet()
+          .removeIf(partition -> consumer.position(partition) >= endOffsets.get(partition));
       emptyPolls = acceptedRecord ? 0 : emptyPolls + 1;
     }
     return List.copyOf(records);

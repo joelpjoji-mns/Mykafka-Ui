@@ -7,6 +7,7 @@ import io.kafbat.ui.service.sampling.RecentTopicSampler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 @Service
 @RequiredArgsConstructor
@@ -23,6 +24,8 @@ public class TopicDataProfileService {
     int sampleLimit = resolveSampleLimit(requestedSampleLimit);
     return recentTopicSampler
         .sample(cluster, topicName, sampleLimit)
+        // Parsing up to MAX_SAMPLE_LIMIT JSON payloads is CPU-bound; keep it off I/O threads.
+        .publishOn(Schedulers.parallel())
         .map(sample -> profile(sample, sampleLimit));
   }
 

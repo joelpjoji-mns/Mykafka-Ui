@@ -106,7 +106,8 @@ final class TopicDataProfileAccumulator {
   private void applyJson(byte[] value) {
     try {
       JsonNode root = objectMapper.readTree(value);
-      if (root == null) {
+      // Empty payloads yield a MissingNode, which is not a parsed JSON value.
+      if (root == null || root.isMissingNode()) {
         return;
       }
       parsedValueCount++;

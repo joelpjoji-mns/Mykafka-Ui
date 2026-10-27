@@ -198,6 +198,22 @@ class OffsetsResetServiceTest extends AbstractIntegrationTest {
   }
 
   @Test
+  void resetToOffsetsRejectsPartitionsThatDoNotExist() {
+    sendMsgsToPartition(Map.of(0, 10));
+
+    StepVerifier.create(offsetsResetService.resetToOffsets(
+            cluster, groupId, topic, Map.of(0, 1L, PARTITIONS + 10, 1L)))
+        .expectErrorSatisfies(error -> assertThat(error)
+            .isInstanceOf(ValidationException.class)
+            .hasMessageContaining(String.valueOf(PARTITIONS + 10)))
+        .verify(Duration.ofSeconds(10));
+    StepVerifier.create(offsetsResetService.previewToOffsets(
+            cluster, groupId, topic, Map.of(PARTITIONS + 10, 1L)))
+        .expectError(ValidationException.class)
+        .verify(Duration.ofSeconds(10));
+  }
+
+  @Test
   void resetToOffsetsCommitsEarliestOrLatestOffsetsIfOffsetsBoundsNotValid() {
     sendMsgsToPartition(Map.of(0, 10, 1, 10, 2, 10));
 

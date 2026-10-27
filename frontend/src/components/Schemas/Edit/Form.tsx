@@ -26,6 +26,7 @@ import {
 } from 'lib/hooks/api/schemas';
 import ResourcePageHeading from 'components/common/ResourcePageHeading/ResourcePageHeading';
 import { typedYupResolver } from 'lib/typedYupResolver';
+import { prettyPrintJson } from 'lib/utils/prettyPrintJson';
 
 import * as S from './Edit.styled';
 
@@ -43,7 +44,7 @@ const Form: React.FC<FormProps> = ({ schema }) => {
   const formatedSchema = React.useMemo(() => {
     return schema?.schemaType === SchemaType.PROTOBUF
       ? schema?.schema
-      : JSON.stringify(JSON.parse(schema?.schema || '{}'), null, '\t');
+      : prettyPrintJson(schema?.schema || '{}');
   }, [schema]);
 
   const validationSchema = () =>

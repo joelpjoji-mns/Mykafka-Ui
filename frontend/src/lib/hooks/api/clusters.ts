@@ -33,6 +33,7 @@ export const clusterStatsQueryOptions = (clusterName: ClusterName) => ({
 export function useClusterStats(clusterName: ClusterName) {
   return useSuspenseQuery({
     ...clusterStatsQueryOptions(clusterName),
-    refetchInterval: 5000,
+    // The backend serves stats from a periodically refreshed cache.
+    refetchInterval: 10_000,
   });
 }

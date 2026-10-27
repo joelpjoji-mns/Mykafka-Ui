@@ -64,6 +64,10 @@ const MessageResults: React.FC<{
     isProvisionalRanking,
     phase,
     isLiveStreamReady,
+    isLivePaused,
+    pausedArrivals,
+    pauseLive,
+    resumeLive,
     abortFetchData,
   } = useTopicMessages({
     clusterName,
@@ -101,6 +105,10 @@ const MessageResults: React.FC<{
         animateLiveArrivals={isLiveStreamReady}
         abortFetchData={abortFetchData}
         consumptionStats={consumptionStats}
+        isLivePaused={isLivePaused}
+        pausedArrivals={pausedArrivals}
+        onPauseLive={pauseLive}
+        onResumeLive={resumeLive}
       />
     </>
   );

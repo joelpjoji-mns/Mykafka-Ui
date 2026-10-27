@@ -145,6 +145,18 @@ describe('Diff', () => {
     });
   });
 
+  describe('when a schema version is not valid JSON', () => {
+    it('renders the raw schema instead of crashing', () => {
+      (useGetSchemasVersions as jest.Mock).mockImplementation(() => ({
+        data: [{ ...versions[1], schema: '{"type": "record"' }, versions[2]],
+        isFetching: false,
+        isError: false,
+      }));
+      setupComponent({ leftVersion: '2', rightVersion: '1' });
+      expect(screen.getAllByRole('listbox')).toHaveLength(2);
+    });
+  });
+
   describe('Back button', () => {
     beforeEach(() => {
       (useGetSchemasVersions as jest.Mock).mockImplementation(() => ({

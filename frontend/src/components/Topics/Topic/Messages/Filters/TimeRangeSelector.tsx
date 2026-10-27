@@ -127,6 +127,8 @@ const ClearButton = styled.button`
   }
 `;
 
+// The date pickers work in the browser's local time, so the badge must
+// describe the browser timezone rather than the app-selected display timezone.
 const detectTimezone = (): { tz: string; offset: string } => {
   let tz = 'UTC';
   try {
@@ -208,7 +210,7 @@ const TimeRangeSelector: React.FC<TimeRangeSelectorProps> = ({
           disabled={disabled}
           isClearable
         />
-        <TimezoneBadge title={`Application timezone: ${tz} (${offset})`}>
+        <TimezoneBadge title={`Browser timezone (${tz}, ${offset})`}>
           {offset}
         </TimezoneBadge>
       </RangeFields>

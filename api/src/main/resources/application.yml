@@ -4,6 +4,11 @@ auth:
 server:
   netty:
     max-initial-line-length: 64KB
+  compression:
+    enabled: ${KAFBAT_UI_HTTP_COMPRESSION_ENABLED:true}
+    min-response-size: 2KB
+    # text/event-stream is intentionally excluded so SSE message streams are flushed immediately.
+    mime-types: application/json,application/x-ndjson,application/javascript,text/javascript,text/html,text/css,text/plain,text/csv,image/svg+xml,application/yaml
 
 spring:
   codec:

@@ -23,7 +23,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -43,10 +42,19 @@ public class AuditTrailService {
   private static final int MAX_AUDIT_PARTITIONS = 64;
   private static final int MAX_EMPTY_POLLS = 2;
   private static final Duration POLL_TIMEOUT = Duration.ofMillis(250);
+  private static final Duration RECENT_READ_TTL = Duration.ofSeconds(10);
+  private static final Duration PAGINATION_TTL = Duration.ofMinutes(5);
+  private static final int MAX_SNAPSHOT_EVENTS = 100_000;
+  private static final int MAX_CURSORS = 10_000;
 
   private final AuditService auditService;
   private final AuditRecordsLoader recordsLoader;
+  // Filtered result lists are stored once per (audit read, query); cursors only reference them, so
+  // many users can page concurrently without evicting each other's cursors.
+  private final Cache<SnapshotKey, AuditSnapshot> snapshots;
   private final Cache<String, AuditCursor> cursors;
+  // Re-filtering within a few seconds reuses the last audit topic read instead of re-polling it.
+  private final Cache<ReadKey, RecentRead> recentReads;
 
   @Autowired
   public AuditTrailService(AuditService auditService, ConsumerGroupService consumerGroupService) {
@@ -57,8 +65,15 @@ public class AuditTrailService {
   AuditTrailService(AuditService auditService, AuditRecordsLoader recordsLoader) {
     this.auditService = auditService;
     this.recordsLoader = recordsLoader;
+    this.snapshots = CacheBuilder.newBuilder()
+        .maximumWeight(MAX_SNAPSHOT_EVENTS)
+        .weigher((SnapshotKey key, AuditSnapshot snapshot) -> snapshot.events().size() + 1)
+        .expireAfterAccess(PAGINATION_TTL)
+        .build();
     this.cursors =
-        CacheBuilder.newBuilder().maximumSize(25).expireAfterWrite(5, TimeUnit.MINUTES).build();
+        CacheBuilder.newBuilder().maximumSize(MAX_CURSORS).expireAfterAccess(PAGINATION_TTL).build();
+    this.recentReads =
+        CacheBuilder.newBuilder().maximumSize(16).expireAfterWrite(RECENT_READ_TTL).build();
   }
 
   public Mono<AuditTrailResponseDTO> getAuditTrail(KafkaCluster cluster, Query query) {
@@ -89,7 +104,13 @@ public class AuditTrailService {
 
   private AuditTrailResponseDTO pageFromAuditTopic(
       KafkaCluster cluster, String auditTopic, Query query) {
-    AuditReadResult result = recordsLoader.load(cluster, auditTopic);
+    RecentRead read = loadRecent(cluster, auditTopic);
+    SnapshotKey key = new SnapshotKey(read.id(), cluster.getName(), query.signature());
+    AuditSnapshot cached = snapshots.getIfPresent(key);
+    if (cached != null) {
+      return page(key, cached, 0, resolvePageSize(query.limit()));
+    }
+    AuditReadResult result = read.result();
     List<AuditTrailEventDTO> events =
         result.records().stream()
             .map(this::toEvent)
@@ -101,47 +122,47 @@ public class AuditTrailService {
                     .thenComparing(AuditTrailEventDTO::getOperation)
                     .thenComparing(AuditTrailEventDTO::getOperator))
             .toList();
-    return page(
-        events,
-        0,
-        result.truncated(),
-        cluster.getName(),
-        query.signature(),
-        resolvePageSize(query.limit()));
+    return page(key, new AuditSnapshot(events, result.truncated()), 0, resolvePageSize(query.limit()));
+  }
+
+  private RecentRead loadRecent(KafkaCluster cluster, String auditTopic) {
+    ReadKey key = new ReadKey(cluster.getName(), auditTopic);
+    RecentRead cached = recentReads.getIfPresent(key);
+    if (cached != null) {
+      return cached;
+    }
+    RecentRead loaded =
+        new RecentRead(UUID.randomUUID().toString(), recordsLoader.load(cluster, auditTopic));
+    recentReads.put(key, loaded);
+    return loaded;
   }
 
   private AuditTrailResponseDTO pageFromCursor(KafkaCluster cluster, Query query) {
     AuditCursor cursor = cursors.getIfPresent(query.cursor());
-    if (cursor == null
-        || !cursor.clusterName().equals(cluster.getName())
-        || !cursor.signature().equals(query.signature())) {
+    AuditSnapshot snapshot = cursor == null ? null : snapshots.getIfPresent(cursor.snapshotKey());
+    if (snapshot == null
+        || !cursor.snapshotKey().clusterName().equals(cluster.getName())
+        || !cursor.snapshotKey().signature().equals(query.signature())) {
       throw new ValidationException("Audit page cursor is invalid or expired.");
     }
-    return page(
-        cursor.events(),
-        cursor.nextIndex(),
-        cursor.truncated(),
-        cursor.clusterName(),
-        cursor.signature(),
-        resolvePageSize(query.limit()));
+    return page(cursor.snapshotKey(), snapshot, cursor.nextIndex(), resolvePageSize(query.limit()));
   }
 
   private AuditTrailResponseDTO page(
-      List<AuditTrailEventDTO> events,
-      int start,
-      boolean truncated,
-      String clusterName,
-      QuerySignature signature,
-      int pageSize) {
+      SnapshotKey snapshotKey, AuditSnapshot snapshot, int start, int pageSize) {
+    List<AuditTrailEventDTO> events = snapshot.events();
     int end = Math.min(start + pageSize, events.size());
     AuditTrailResponseDTO response =
         new AuditTrailResponseDTO()
             .status(AuditTrailResponseDTO.StatusEnum.AVAILABLE)
             .events(events.subList(start, end))
-            .truncated(truncated);
+            .truncated(snapshot.truncated());
     if (end < events.size()) {
+      if (snapshots.getIfPresent(snapshotKey) == null) {
+        snapshots.put(snapshotKey, snapshot);
+      }
       String nextCursor = UUID.randomUUID().toString();
-      cursors.put(nextCursor, new AuditCursor(clusterName, signature, events, end, truncated));
+      cursors.put(nextCursor, new AuditCursor(snapshotKey, end));
       response.nextCursor(nextCursor);
     }
     return response;
@@ -291,12 +312,15 @@ public class AuditTrailService {
   @VisibleForTesting
   record AuditReadResult(List<AuditRecord> records, boolean truncated) {}
 
-  private record AuditCursor(
-      String clusterName,
-      QuerySignature signature,
-      List<AuditTrailEventDTO> events,
-      int nextIndex,
-      boolean truncated) {}
+  private record AuditSnapshot(List<AuditTrailEventDTO> events, boolean truncated) {}
+
+  private record SnapshotKey(String readId, String clusterName, QuerySignature signature) {}
+
+  private record AuditCursor(SnapshotKey snapshotKey, int nextIndex) {}
+
+  private record ReadKey(String clusterName, String auditTopic) {}
+
+  private record RecentRead(String id, AuditReadResult result) {}
 
   private record QuerySignature(
       OffsetDateTime from, OffsetDateTime to, String resource, String operation, String outcome) {}
@@ -358,7 +382,12 @@ public class AuditTrailService {
             continue;
           }
           emptyPolls = 0;
-          polled.forEach(record -> parseRecord(record.value().get()).ifPresent(records::add));
+          polled.forEach(record -> {
+            // Tombstones (null values) carry no audit event and must not abort the whole read.
+            if (record.value() != null) {
+              parseRecord(record.value().get()).ifPresent(records::add);
+            }
+          });
           if (startingOffsets.keySet().stream()
               .allMatch(
                   partition -> consumer.position(partition) >= endingOffsets.get(partition))) {

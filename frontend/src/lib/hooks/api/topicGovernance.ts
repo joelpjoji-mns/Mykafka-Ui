@@ -14,5 +14,6 @@ export function useTopicGovernance(
         includeInternal,
       }),
     refetchInterval: 30_000,
+    staleTime: 25_000,
   });
 }

@@ -228,32 +228,37 @@ export function useGetConsumerGroupsLag({
   includePartitions,
 }: UseGetConsumerGroupsLagProps) {
   const pollingEnabled = pollingIntervalSec > 0;
-  const lastUpdateRef = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    lastUpdateRef.current = undefined;
-  }, [clusterName, ids.join(',')]);
+  const queryClient = useQueryClient();
+  const queryKey = [
+    'clusters',
+    clusterName,
+    'consumerGroupsLag',
+    ids,
+    includePartitions,
+  ];
 
   return useQuery<ConsumerGroupsLagResponse, ServerResponse>({
-    queryKey: [
-      'clusters',
-      clusterName,
-      'consumerGroupsLag',
-      ids,
-      includePartitions,
-    ],
+    queryKey,
     queryFn: async () => {
+      // lastUpdate must come from the data cached for this exact key: ids and
+      // includePartitions change the shape of the response.
+      const previous =
+        queryClient.getQueryData<ConsumerGroupsLagResponse>(queryKey);
       const response = await apiFetch(() =>
         api.getConsumerGroupsLag({
           clusterName,
           ids,
-          lastUpdate: lastUpdateRef.current,
+          lastUpdate: previous?.updateTimestamp,
           includePartitions,
         })
       );
 
-      lastUpdateRef.current = response.updateTimestamp;
-      return response;
+      // The API omits all groups when nothing changed since lastUpdate.
+      const isUnchanged =
+        previous !== undefined &&
+        response.updateTimestamp === previous.updateTimestamp &&
+        Object.keys(response.consumerGroups ?? {}).length === 0;
+      return isUnchanged ? previous : response;
     },
     enabled: ids.length > 0,
     refetchInterval: (query) =>

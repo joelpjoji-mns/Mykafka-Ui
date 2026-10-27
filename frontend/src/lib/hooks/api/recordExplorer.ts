@@ -33,5 +33,8 @@ export function useRecordExplorer(
       ),
     enabled: filters !== undefined,
     placeholderData: (previousData) => previousData,
+    // Searches sample many topics; reuse results unless explicitly refreshed.
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }

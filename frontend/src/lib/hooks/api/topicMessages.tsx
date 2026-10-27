@@ -264,6 +264,84 @@ export const appendStringFilters = (
   });
 };
 
+const getMessagesPollingMode = (searchParams: URLSearchParams) =>
+  searchParams.has('orderBy')
+    ? PollingMode.EARLIEST
+    : convertStrToPollingMode(
+        searchParams.get(MessagesFilterKeys.mode) || ''
+      ) || PollingMode.TAILING;
+
+const buildMessagesRequestParams = (
+  searchParams: URLSearchParams,
+  mode: PollingMode,
+  stringFilters: string[]
+) => {
+  const requestParams = new URLSearchParams({
+    limit: searchParams.get(MessagesFilterKeys.limit) || MESSAGES_PER_PAGE,
+    mode,
+  });
+
+  [
+    MessagesFilterKeys.keySerde,
+    MessagesFilterKeys.smartFilterId,
+    MessagesFilterKeys.valueSerde,
+    'searchMatch',
+    'searchScope',
+    'orderBy',
+    'sortOrder',
+  ].forEach((item) => {
+    const value = searchParams.get(item);
+    if (value) {
+      requestParams.set(item, value);
+    }
+  });
+
+  appendStringFilters(
+    requestParams,
+    searchParams.get(MessagesFilterKeys.stringFilter),
+    stringFilters
+  );
+
+  switch (mode) {
+    case PollingMode.TO_TIMESTAMP:
+    case PollingMode.FROM_TIMESTAMP:
+      requestParams.set(
+        MessagesFilterKeys.timestamp,
+        searchParams.get(MessagesFilterKeys.timestamp) || '0'
+      );
+      break;
+    case PollingMode.TO_OFFSET:
+    case PollingMode.FROM_OFFSET:
+      requestParams.set(
+        MessagesFilterKeys.offset,
+        searchParams.get(MessagesFilterKeys.offset) || '0'
+      );
+      break;
+    default:
+  }
+
+  const timestampToRaw = searchParams.has('orderBy')
+    ? null
+    : searchParams.get(MessagesFilterKeys.timestampTo);
+  if (timestampToRaw) {
+    requestParams.set(MessagesFilterKeys.timestampTo, timestampToRaw);
+  }
+
+  const partitions = searchParams.get(MessagesFilterKeys.partitions);
+  if (partitions !== null) {
+    requestParams.append(MessagesFilterKeys.partitions, partitions);
+  }
+
+  return requestParams;
+};
+
+// Identifies a result set independently of the page cursor.
+const getMessagesRequestKey = (
+  clusterName: ClusterName,
+  topicName: TopicName,
+  requestParams: URLSearchParams
+) => JSON.stringify([clusterName, topicName, requestParams.toString()]);
+
 export const useTopicMessages = ({
   clusterName,
   topicName,
@@ -298,6 +376,12 @@ export const useTopicMessages = ({
   const scheduledMessageFlush = useRef<number | undefined>(undefined);
   const prevCursor = useRef(0);
   const prevRequestKey = useRef('');
+  // Live arrivals received while the tail is paused; replayed on resume.
+  const [isLivePaused, setIsLivePaused] = React.useState(false);
+  const [pausedArrivals, setPausedArrivals] = React.useState(0);
+  const livePausedRef = useRef(false);
+  const pausedMessages = useRef<PendingMessage[]>([]);
+  const resumeLiveRef = useRef<() => void>(() => {});
 
   // get initial properties
 
@@ -307,6 +391,19 @@ export const useTopicMessages = ({
       scheduledMessageFlush.current = undefined;
     }
     pendingMessages.current = [];
+    pausedMessages.current = [];
+  }, []);
+
+  const pauseLive = useCallback(() => {
+    livePausedRef.current = true;
+    setIsLivePaused(true);
+  }, []);
+
+  const resumeLive = useCallback(() => {
+    livePausedRef.current = false;
+    setIsLivePaused(false);
+    setPausedArrivals(0);
+    resumeLiveRef.current();
   }, []);
 
   const abortFetchData = useCallback(() => {
@@ -336,6 +433,10 @@ export const useTopicMessages = ({
     setIsFetching(enabled);
     setIsLiveStreamReady(false);
     setIsProvisionalRanking(false);
+    livePausedRef.current = false;
+    setIsLivePaused(false);
+    setPausedArrivals(0);
+    resumeLiveRef.current = () => {};
     sortedScanSnapshot.current = null;
     provisionalSortedPage.current = [];
     completedSortedPage.current = null;
@@ -346,10 +447,18 @@ export const useTopicMessages = ({
       return undefined;
     }
 
+    const mode = getMessagesPollingMode(searchParams);
+
     const cachedPage = searchParams.has('orderBy')
       ? getCachedSortedPage(requestIdentity)
       : undefined;
     if (cachedPage) {
+      prevRequestKey.current = getMessagesRequestKey(
+        clusterName,
+        topicName,
+        buildMessagesRequestParams(searchParams, mode, stringFilters)
+      );
+      prevCursor.current = getCursorValue(searchParams);
       setMessages(cachedPage.messages);
       useMessageFiltersStore.getState().setNextCursor(cachedPage.nextCursor);
       setIsFetching(false);
@@ -383,11 +492,6 @@ export const useTopicMessages = ({
       }
     };
 
-    const mode = searchParams.has('orderBy')
-      ? PollingMode.EARLIEST
-      : convertStrToPollingMode(
-          searchParams.get(MessagesFilterKeys.mode) || ''
-        ) || PollingMode.TAILING;
     setIsLiveStreamReady(false);
     liveStreamReadyRef.current = false;
 
@@ -398,8 +502,27 @@ export const useTopicMessages = ({
         return;
       }
 
-      const messagesToFlush = pendingMessages.current;
+      let messagesToFlush = pendingMessages.current;
       pendingMessages.current = [];
+      if (livePausedRef.current) {
+        const liveArrivals = messagesToFlush.filter(
+          ({ shouldPrepend }) => shouldPrepend
+        );
+        if (liveArrivals.length > 0) {
+          // Only the newest `limit` arrivals can ever be shown, so the buffer is bounded.
+          const limit = Number(
+            searchParams.get(MessagesFilterKeys.limit) || MESSAGES_PER_PAGE
+          );
+          pausedMessages.current = [
+            ...pausedMessages.current,
+            ...liveArrivals,
+          ].slice(-limit);
+          setPausedArrivals(pausedMessages.current.length);
+          messagesToFlush = messagesToFlush.filter(
+            ({ shouldPrepend }) => !shouldPrepend
+          );
+        }
+      }
       if (messagesToFlush.length === 0) return;
 
       const updateMessages = () => {
@@ -431,6 +554,17 @@ export const useTopicMessages = ({
       }
     };
 
+    resumeLiveRef.current = () => {
+      const buffered = pausedMessages.current;
+      pausedMessages.current = [];
+      if (!isCurrentRequest() || buffered.length === 0) return;
+      pendingMessages.current = [...buffered, ...pendingMessages.current];
+      if (scheduledMessageFlush.current === undefined) {
+        scheduledMessageFlush.current =
+          scheduleMessageFlush(flushPendingMessages);
+      }
+    };
+
     const queueMessage = (message: TopicMessage, shouldPrepend: boolean) => {
       pendingMessages.current.push({ message, shouldPrepend });
       if (shouldPrepend) {
@@ -447,10 +581,6 @@ export const useTopicMessages = ({
       }
     };
 
-    const timestampToRaw = searchParams.has('orderBy')
-      ? null
-      : searchParams.get(MessagesFilterKeys.timestampTo);
-
     const fetchData = async () => {
       setIsFetching(true);
       setPhase(undefined);
@@ -460,66 +590,19 @@ export const useTopicMessages = ({
         clusterName
       )}/topics/${encodeURIComponent(topicName)}/messages/v2`;
 
-      const requestParams = new URLSearchParams({
-        limit: searchParams.get(MessagesFilterKeys.limit) || MESSAGES_PER_PAGE,
+      const requestParams = buildMessagesRequestParams(
+        searchParams,
         mode,
-      });
-
-      [
-        MessagesFilterKeys.keySerde,
-        MessagesFilterKeys.smartFilterId,
-        MessagesFilterKeys.valueSerde,
-        'searchMatch',
-        'searchScope',
-        'orderBy',
-        'sortOrder',
-      ].forEach((item) => {
-        const value = searchParams.get(item);
-        if (value) {
-          requestParams.set(item, value);
-        }
-      });
-
-      appendStringFilters(
-        requestParams,
-        searchParams.get(MessagesFilterKeys.stringFilter),
         stringFilters
       );
-
-      switch (mode) {
-        case PollingMode.TO_TIMESTAMP:
-        case PollingMode.FROM_TIMESTAMP:
-          requestParams.set(
-            MessagesFilterKeys.timestamp,
-            searchParams.get(MessagesFilterKeys.timestamp) || '0'
-          );
-          break;
-        case PollingMode.TO_OFFSET:
-        case PollingMode.FROM_OFFSET:
-          requestParams.set(
-            MessagesFilterKeys.offset,
-            searchParams.get(MessagesFilterKeys.offset) || '0'
-          );
-          break;
-        default:
-      }
-
-      if (timestampToRaw) {
-        requestParams.set(MessagesFilterKeys.timestampTo, timestampToRaw);
-      }
-
-      const partitions = searchParams.get(MessagesFilterKeys.partitions);
-      if (partitions !== null) {
-        requestParams.append(MessagesFilterKeys.partitions, partitions);
-      }
       const { nextCursor, setNextCursor } = useMessageFiltersStore.getState();
 
       const currentCursor = getCursorValue(searchParams);
-      const requestKey = JSON.stringify([
+      const requestKey = getMessagesRequestKey(
         clusterName,
         topicName,
-        requestParams.toString(),
-      ]);
+        requestParams
+      );
       if (
         searchParams.has('orderBy') &&
         currentCursor > 0 &&
@@ -753,6 +836,11 @@ export const useTopicMessages = ({
       activeIdentity === requestIdentity && enabled && isLiveStreamReady,
     isProvisionalRanking:
       activeIdentity === requestIdentity && enabled && isProvisionalRanking,
+    isLivePaused: activeIdentity === requestIdentity && enabled && isLivePaused,
+    pausedArrivals:
+      activeIdentity === requestIdentity && enabled ? pausedArrivals : 0,
+    pauseLive,
+    resumeLive,
     abortFetchData,
   };
 };
@@ -855,7 +943,8 @@ export function useDownloadMessagesZip() {
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
-      URL.revokeObjectURL(downloadUrl);
+      // Revoking synchronously can cancel the download in some browsers.
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 1_000);
     },
   });
 }

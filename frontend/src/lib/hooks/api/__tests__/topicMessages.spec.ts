@@ -443,6 +443,88 @@ describe('Topic Messages hooks', () => {
     secondRender.unmount();
   });
 
+  it('requests the next sorted page after serving the current page from cache', async () => {
+    const navigation: { navigate?: ReturnType<typeof useNavigate> } = {};
+    const CaptureNavigation = () => {
+      navigation.navigate = useNavigate();
+      return null;
+    };
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/?orderBy=size&sortOrder=DESC'] },
+        createElement(
+          Fragment,
+          null,
+          children,
+          createElement(CaptureNavigation)
+        )
+      );
+    const firstRender = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
+    const options = (fetchEventSource as jest.Mock).mock.calls[0][1];
+    await act(async () => {
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 1, value: 'page-1' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results complete' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.DONE,
+          cursor: { id: 'sorted-page-2' },
+        }),
+      });
+      options.onclose();
+    });
+    await waitFor(() =>
+      expect(
+        firstRender.result.current.messages.map(({ value }) => value)
+      ).toEqual(['page-1'])
+    );
+    firstRender.unmount();
+
+    const secondRender = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper }
+    );
+    await waitFor(() =>
+      expect(
+        secondRender.result.current.messages.map(({ value }) => value)
+      ).toEqual(['page-1'])
+    );
+    expect(fetchEventSource).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      navigation.navigate?.('/?orderBy=size&sortOrder=DESC&cursor=1');
+    });
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(2));
+    const nextUrl = new URL(
+      (fetchEventSource as jest.Mock).mock.calls[1][0],
+      'http://localhost'
+    );
+    expect(nextUrl.searchParams.get('cursor')).toBe('sorted-page-2');
+    expect(useMessageFiltersStore.getState().nextCursor).toBe('sorted-page-2');
+    secondRender.unmount();
+  });
+
   it('requests the next sorted page with its cursor and clears Next at the end', async () => {
     const navigation: { navigate?: ReturnType<typeof useNavigate> } = {};
     const CaptureNavigation = () => {
@@ -795,6 +877,57 @@ describe('Topic Messages hooks', () => {
     unmount();
   });
 
+  it('buffers live arrivals while paused and shows them on resume', async () => {
+    const historical = { partition: 0, offset: 1, value: 'history' };
+    const { result, unmount } = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper: MessagesHookRouter }
+    );
+
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
+    const options = (fetchEventSource as jest.Mock).mock.calls[0][1];
+    const emitMessage = (message: object) =>
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message,
+        }),
+      });
+
+    await act(async () => {
+      await options.onopen({ ok: true, status: 200 });
+      emitMessage(historical);
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Live polling' },
+        }),
+      });
+    });
+    await waitFor(() => expect(result.current.isLiveStreamReady).toBe(true));
+
+    act(() => result.current.pauseLive());
+    await act(async () => {
+      emitMessage({ partition: 0, offset: 2, value: 'live-2' });
+      emitMessage({ partition: 0, offset: 3, value: 'live-3' });
+    });
+
+    await waitFor(() => expect(result.current.pausedArrivals).toBe(2));
+    expect(result.current.isLivePaused).toBe(true);
+    expect(result.current.messages).toEqual([historical]);
+
+    act(() => result.current.resumeLive());
+
+    await waitFor(() =>
+      expect(result.current.messages.map(({ offset }) => offset)).toEqual([
+        3, 2, 1,
+      ])
+    );
+    expect(result.current.isLivePaused).toBe(false);
+    expect(result.current.pausedArrivals).toBe(0);
+    unmount();
+  });
+
   it('retains only the latest live messages', async () => {
     const { result, unmount } = renderHook(
       () => hooks.useTopicMessages({ clusterName, topicName }),
@@ -934,7 +1067,11 @@ describe('Topic Messages hooks', () => {
     expect(mock.calls()).toHaveLength(1);
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(click).toHaveBeenCalledTimes(1);
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:messages');
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    await waitFor(
+      () => expect(revokeObjectURL).toHaveBeenCalledWith('blob:messages'),
+      { timeout: 2_000 }
+    );
   });
 
   it('downloads with per-partition starting offsets', async () => {

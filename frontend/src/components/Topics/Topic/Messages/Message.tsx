@@ -10,8 +10,6 @@ import Tooltip from 'components/common/Tooltip/Tooltip';
 import BytesFormatted from 'components/common/BytesFormatted/BytesFormatted';
 import { useTimezone } from 'lib/hooks/useTimezones';
 import ClusterContext from 'components/contexts/ClusterContext';
-import { useSearchParams } from 'react-router-dom';
-import { MessagesFilterKeys } from 'lib/constants';
 import HighlightedText from 'components/common/HighlightedText/HighlightedText';
 
 import MessageContent from './MessageContent/MessageContent';
@@ -29,7 +27,49 @@ export interface Props {
   contentFilters: PreviewFilter[];
   message: TopicMessage;
   isLiveArrival?: boolean;
+  searchTerms?: string[];
 }
+
+const EMPTY_SEARCH_TERMS: string[] = [];
+
+const getParsedJson = (jsonValue: string) => {
+  try {
+    return JSON.parse(jsonValue);
+  } catch {
+    return {};
+  }
+};
+
+const renderFilteredJson = (
+  jsonValue: string | undefined,
+  filters: PreviewFilter[],
+  searchTerms: string[]
+) => {
+  if (!jsonValue) return jsonValue;
+  if (!filters.length)
+    return <HighlightedText text={jsonValue} terms={searchTerms} />;
+  const parsedJson = getParsedJson(jsonValue);
+
+  return (
+    <>
+      {filters.map((item) => {
+        return (
+          <div key={`${item.path}--${item.field}`}>
+            {item.field}:{' '}
+            <HighlightedText
+              text={
+                JSON.stringify(
+                  JSONPath({ path: item.path, json: parsedJson, wrap: false })
+                ) || ''
+              }
+              terms={searchTerms}
+            />
+          </div>
+        );
+      })}
+    </>
+  );
+};
 
 const Message: React.FC<Props> = ({
   message,
@@ -37,10 +77,9 @@ const Message: React.FC<Props> = ({
   headersFilters,
   contentFilters,
   isLiveArrival = false,
+  searchTerms = EMPTY_SEARCH_TERMS,
 }) => {
   const { currentTimezone } = useTimezone();
-  const [params] = useSearchParams();
-  const searchTerms = params.getAll(MessagesFilterKeys.stringFilter);
   const [isOpen, setIsOpen] = React.useState(false);
   const { messageRelativeTimestamp } = React.useContext(ClusterContext);
 
@@ -63,52 +102,35 @@ const Message: React.FC<Props> = ({
 
   const toggleIsOpen = () => setIsOpen(!isOpen);
 
+  // Hover toggles this state; the memoized cell content below keeps those
+  // re-renders from re-parsing and re-highlighting message data.
   const [vEllipsisOpen, setVEllipsisOpen] = React.useState(false);
 
-  const getParsedJson = (jsonValue: string) => {
-    try {
-      return JSON.parse(jsonValue);
-    } catch {
-      return {};
-    }
-  };
-
-  const renderFilteredJson = (
-    jsonValue?: string,
-    filters?: PreviewFilter[]
-  ) => {
-    if (!jsonValue) return jsonValue;
-    if (!filters?.length)
-      return <HighlightedText text={jsonValue} terms={searchTerms} />;
-    const parsedJson = getParsedJson(jsonValue);
-
-    return (
-      <>
-        {filters.map((item) => {
-          return (
-            <div key={`${item.path}--${item.field}`}>
-              {item.field}:{' '}
-              <HighlightedText
-                text={
-                  JSON.stringify(
-                    JSONPath({ path: item.path, json: parsedJson, wrap: false })
-                  ) || ''
-                }
-                terms={searchTerms}
-              />
-            </div>
-          );
-        })}
-      </>
-    );
-  };
-
-  const messageTimestamp = formatTimestamp({
-    timestamp,
-    timezone: currentTimezone.value,
-    withMilliseconds: true,
-  });
-  const serializedHeaders = JSON.stringify(headers || {});
+  const messageTimestamp = React.useMemo(
+    () =>
+      formatTimestamp({
+        timestamp,
+        timezone: currentTimezone.value,
+        withMilliseconds: true,
+      }),
+    [timestamp, currentTimezone.value]
+  );
+  const serializedHeaders = React.useMemo(
+    () => JSON.stringify(headers || {}),
+    [headers]
+  );
+  const renderedKey = React.useMemo(
+    () => renderFilteredJson(key, keyFilters, searchTerms),
+    [key, keyFilters, searchTerms]
+  );
+  const renderedHeaders = React.useMemo(
+    () => renderFilteredJson(serializedHeaders, headersFilters, searchTerms),
+    [serializedHeaders, headersFilters, searchTerms]
+  );
+  const renderedValue = React.useMemo(
+    () => renderFilteredJson(value, contentFilters, searchTerms),
+    [value, contentFilters, searchTerms]
+  );
   const messageId = `${partition}:${offset}`;
   const messageSize =
     keySize !== undefined ||
@@ -154,7 +176,7 @@ const Message: React.FC<Props> = ({
           )}
         </td>
         <S.DataCell title={key}>
-          <Ellipsis text={renderFilteredJson(key, keyFilters)}>
+          <Ellipsis text={renderedKey}>
             {keySerde === 'Fallback' && (
               <Tooltip
                 value={<WarningRedIcon />}
@@ -165,14 +187,12 @@ const Message: React.FC<Props> = ({
           </Ellipsis>
         </S.DataCell>
         <S.DataCell title={serializedHeaders}>
-          <Ellipsis
-            text={renderFilteredJson(serializedHeaders, headersFilters)}
-          />
+          <Ellipsis text={renderedHeaders} />
         </S.DataCell>
         <S.DataCell title={value}>
           <S.Metadata>
             <S.MetadataValue>
-              <Ellipsis text={renderFilteredJson(value, contentFilters)}>
+              <Ellipsis text={renderedValue}>
                 {valueSerde === 'Fallback' && (
                   <Tooltip
                     value={<WarningRedIcon />}

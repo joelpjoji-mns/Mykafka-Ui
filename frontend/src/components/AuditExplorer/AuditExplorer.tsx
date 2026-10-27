@@ -12,6 +12,7 @@ import {
 } from 'generated-sources';
 import useAppParams from 'lib/hooks/useAppParams';
 import { useAuditTrail } from 'lib/hooks/api/audit';
+import { uniqueKeys } from 'lib/utils/uniqueKeys';
 import {
   clusterBrokerPath,
   clusterConsumerGroupDetailsPath,
@@ -100,52 +101,66 @@ const AuditResources: React.FC<{
   );
 };
 
+type PaginationState = {
+  cursors: Array<string | undefined>;
+  pageIndex: number;
+};
+
+const firstPage: PaginationState = { cursors: [undefined], pageIndex: 0 };
+
 const AuditExplorer: React.FC = () => {
   const { clusterName } = useAppParams<ClusterNameRoute>();
   const [draft, setDraft] = React.useState<FilterState>(emptyFilters);
   const [filters, setFilters] = React.useState<FilterState>(emptyFilters);
   const [limit, setLimit] = React.useState(DEFAULT_LIMIT);
-  const [cursors, setCursors] = React.useState<Array<string | undefined>>([
-    undefined,
-  ]);
-  const [pageIndex, setPageIndex] = React.useState(0);
+  const [{ cursors, pageIndex }, setPagination] =
+    React.useState<PaginationState>(firstPage);
   const cursor = cursors[pageIndex];
-  const { data, error, isLoading, refetch } = useAuditTrail(clusterName, {
-    from: toDate(filters.from),
-    to: toDate(filters.to),
-    resource: filters.resource || undefined,
-    operation: filters.operation || undefined,
-    outcome: filters.outcome || undefined,
-    cursor,
-    limit,
-  });
+  const { data, error, isLoading, isFetching, isPlaceholderData, refetch } =
+    useAuditTrail(clusterName, {
+      from: toDate(filters.from),
+      to: toDate(filters.to),
+      resource: filters.resource || undefined,
+      operation: filters.operation || undefined,
+      outcome: filters.outcome || undefined,
+      cursor,
+      limit,
+    });
+  // While a page loads, the previous page is still displayed; its cursor must not
+  // be used to advance again.
+  const isPageLoading = isFetching || isPlaceholderData;
 
   const applyFilters = () => {
     setFilters(draft);
-    setCursors([undefined]);
-    setPageIndex(0);
+    setPagination(firstPage);
   };
 
   const clearFilters = () => {
     setDraft(emptyFilters);
     setFilters(emptyFilters);
-    setCursors([undefined]);
-    setPageIndex(0);
+    setPagination(firstPage);
   };
 
   const changeLimit = (value: number) => {
     setLimit(value);
-    setCursors([undefined]);
-    setPageIndex(0);
+    setPagination(firstPage);
   };
 
   const nextPage = () => {
-    if (!data?.nextCursor) return;
-    setCursors((current) => [
-      ...current.slice(0, pageIndex + 1),
-      data.nextCursor,
-    ]);
-    setPageIndex((current) => current + 1);
+    const nextCursor = data?.nextCursor;
+    if (!nextCursor || isPageLoading) return;
+    setPagination((current) => ({
+      cursors: [...current.cursors.slice(0, current.pageIndex + 1), nextCursor],
+      pageIndex: current.pageIndex + 1,
+    }));
+  };
+
+  const previousPage = () => {
+    if (isPageLoading) return;
+    setPagination((current) => ({
+      ...current,
+      pageIndex: Math.max(0, current.pageIndex - 1),
+    }));
   };
 
   if (isLoading) {
@@ -165,6 +180,12 @@ const AuditExplorer: React.FC = () => {
 
   const isUnavailable =
     data.status === AuditTrailResponseStatusEnum.UNAVAILABLE;
+  const eventRowKeys = uniqueKeys(
+    data.events.map(
+      (event) =>
+        `${event.timestamp.toISOString()}-${event.operator}-${event.operation}`
+    )
+  );
 
   return (
     <>
@@ -276,12 +297,19 @@ const AuditExplorer: React.FC = () => {
                 matching evidence may not be included.
               </S.Notice>
             )}
-            <S.Evidence aria-labelledby="audit-evidence-heading">
+            <S.Evidence
+              aria-labelledby="audit-evidence-heading"
+              aria-busy={isPageLoading}
+            >
               <S.EvidenceHeader>
                 <S.EvidenceTitle id="audit-evidence-heading">
                   Change evidence
                 </S.EvidenceTitle>
-                <S.PageState>Page {pageIndex + 1}</S.PageState>
+                <S.PageState aria-live="polite">
+                  {isPageLoading
+                    ? `Loading page ${pageIndex + 1}…`
+                    : `Page ${pageIndex + 1}`}
+                </S.PageState>
               </S.EvidenceHeader>
               <S.TableViewport>
                 {data.events.length === 0 ? (
@@ -300,10 +328,8 @@ const AuditExplorer: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.events.map((event) => (
-                        <tr
-                          key={`${event.timestamp.toISOString()}-${event.operator}-${event.operation}`}
-                        >
+                      {data.events.map((event, index) => (
+                        <tr key={eventRowKeys[index]}>
                           <td>{formatTimestamp(event.timestamp)}</td>
                           <td>{event.operator}</td>
                           <td>
@@ -334,17 +360,15 @@ const AuditExplorer: React.FC = () => {
                 <Button
                   buttonType="secondary"
                   buttonSize="M"
-                  disabled={pageIndex === 0}
-                  onClick={() =>
-                    setPageIndex((current) => Math.max(0, current - 1))
-                  }
+                  disabled={pageIndex === 0 || isPageLoading}
+                  onClick={previousPage}
                 >
                   Previous
                 </Button>
                 <Button
                   buttonType="secondary"
                   buttonSize="M"
-                  disabled={!data.nextCursor}
+                  disabled={!data.nextCursor || isPageLoading}
                   onClick={nextPage}
                 >
                   Next

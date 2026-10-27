@@ -30,10 +30,22 @@ const CommandPalette: React.FC = () => {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        setIsOpen((open) => !open);
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.key?.toLowerCase() !== 'k'
+      ) {
+        return;
       }
+      // Leave the shortcut to editors (e.g. Ace find-next) that handle it.
+      const { target } = event;
+      if (
+        event.defaultPrevented ||
+        (target instanceof Element && target.closest('.ace_editor'))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setIsOpen((open) => !open);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

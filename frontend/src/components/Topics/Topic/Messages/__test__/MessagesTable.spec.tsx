@@ -76,6 +76,32 @@ describe('MessagesTable', () => {
     );
   };
 
+  it('highlights URL search terms in rows and keeps duplicate records keyed uniquely', () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation();
+    renderComponent(
+      {
+        messages: [
+          { ...topicMessagePayload, key: 'needle-key' },
+          { ...topicMessagePayload, key: 'needle-key' },
+          { ...topicMessagePayload, offset: 15, key: 'other' },
+        ],
+      },
+      '/?mode=EARLIEST&stringFilter=needle'
+    );
+
+    const rows = screen.getByRole('table').querySelectorAll('tbody tr');
+    expect(rows).toHaveLength(3);
+    const highlighted = screen.getByRole('table').querySelectorAll('mark');
+    expect(highlighted).toHaveLength(2);
+    expect(highlighted[0]).toHaveTextContent('needle');
+    expect(
+      consoleError.mock.calls.some((args) =>
+        args.some((arg) => String(arg).includes('same key'))
+      )
+    ).toBe(false);
+    consoleError.mockRestore();
+  });
+
   it('requests full-topic ascending/descending rankings without locally reordering rows', async () => {
     renderComponent(
       {
@@ -391,6 +417,52 @@ describe('MessagesTable', () => {
       (useIsLiveMode as jest.Mock).mockImplementation(() => false);
       renderComponent({ isFetching: false });
       expect(screen.queryByText(/next/i)).toBeDisabled();
+    });
+
+    it('pauses and resumes live tailing with a buffered arrival count', async () => {
+      (useIsLiveMode as jest.Mock).mockImplementation(() => true);
+      const onPauseLive = jest.fn();
+      const onResumeLive = jest.fn();
+      const { rerender } = renderComponent({
+        animateLiveArrivals: true,
+        onPauseLive,
+        onResumeLive,
+      });
+
+      await userEvent.click(screen.getByRole('button', { name: 'Pause live' }));
+      expect(onPauseLive).toHaveBeenCalledTimes(1);
+
+      rerender(
+        <TopicActionsProvider openSidebarWithMessage={jest.fn()}>
+          <MessagesTable
+            messages={[]}
+            isFetching={false}
+            animateLiveArrivals
+            isLivePaused
+            pausedArrivals={3}
+            onPauseLive={onPauseLive}
+            onResumeLive={onResumeLive}
+          />
+        </TopicActionsProvider>
+      );
+      const resume = screen.getByRole('button', {
+        name: 'Resume live (3 new)',
+      });
+      expect(resume).toHaveAttribute('aria-pressed', 'true');
+      await userEvent.click(resume);
+      expect(onResumeLive).toHaveBeenCalledTimes(1);
+    });
+
+    it('hides the live pause control outside live tailing', () => {
+      (useIsLiveMode as jest.Mock).mockImplementation(() => false);
+      renderComponent({
+        animateLiveArrivals: true,
+        onPauseLive: jest.fn(),
+        onResumeLive: jest.fn(),
+      });
+      expect(
+        screen.queryByRole('button', { name: /pause live/i })
+      ).not.toBeInTheDocument();
     });
 
     it('shows inline loading status without a blocking spinner', () => {

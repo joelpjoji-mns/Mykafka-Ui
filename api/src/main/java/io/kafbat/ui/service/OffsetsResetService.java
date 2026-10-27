@@ -220,11 +220,20 @@ public class OffsetsResetService {
 
   private Mono<Void> waitForGroupToBecomeInactive(
       ReactiveAdminClient adminClient, String groupId) {
-    return Mono.defer(() -> describeExistingConsumerGroup(adminClient, groupId))
-        .repeatWhen(completed -> completed.delayElements(ACTIVE_GROUP_RESET_POLL_INTERVAL))
-        .filter(group -> isInactive(group.state()))
-        .next()
-        .then();
+    // Existence is verified once; subsequent polls only describe the single group instead of
+    // listing every consumer group in the cluster on each iteration.
+    return describeExistingConsumerGroup(adminClient, groupId)
+        .flatMap(initial -> isInactive(initial.state())
+            ? Mono.<Void>empty()
+            : Mono.defer(() -> adminClient.describeConsumerGroups(List.of(groupId)))
+                .delaySubscription(ACTIVE_GROUP_RESET_POLL_INTERVAL)
+                .repeat()
+                .filter(groups -> {
+                  ConsumerGroupDescription group = groups.get(groupId);
+                  return group == null || isInactive(group.state());
+                })
+                .next()
+                .then());
   }
 
   private boolean isInactive(ConsumerGroupState state) {
@@ -253,6 +262,15 @@ public class OffsetsResetService {
   private Map<TopicPartition, Long> editOffsetsBounds(Map<TopicPartition, Long> offsetsToCheck,
                                                       Map<TopicPartition, Long> earliestOffsets,
                                                       Map<TopicPartition, Long> latestOffsets) {
+    var unknownPartitions = offsetsToCheck.keySet().stream()
+        .filter(tp -> !earliestOffsets.containsKey(tp) || !latestOffsets.containsKey(tp))
+        .map(TopicPartition::partition)
+        .sorted()
+        .toList();
+    if (!unknownPartitions.isEmpty()) {
+      throw new ValidationException(
+          "Offsets are not available for partition(s) %s".formatted(unknownPartitions));
+    }
     var result = new HashMap<TopicPartition, Long>();
     offsetsToCheck.forEach((tp, offset) -> {
       if (earliestOffsets.get(tp) > offset) {

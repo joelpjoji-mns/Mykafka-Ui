@@ -496,13 +496,13 @@ public class TopicsController extends AbstractController implements TopicsApi, M
             .build();
 
     return validateAccess(context)
-        .then(
-            topicsService
-                .getTopicDetails(getCluster(clusterName), topicName)
-                .then(
-                    topicDataProfileService.profile(
-                        getCluster(clusterName), topicName, sampleLimit))
-                .map(ResponseEntity::ok))
+        .then(Mono.defer(() -> {
+          var cluster = getCluster(clusterName);
+          return topicsService
+              .ensureTopicExists(cluster, topicName)
+              .then(topicDataProfileService.profile(cluster, topicName, sampleLimit))
+              .map(ResponseEntity::ok);
+        }))
         .doOnEach(sig -> audit(context, sig));
   }
 

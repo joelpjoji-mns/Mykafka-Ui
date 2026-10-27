@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { GetAuditTrailOutcomeEnum } from 'generated-sources';
 import { auditApiClient as api } from 'lib/api';
 import { ClusterName } from 'lib/interfaces/cluster';
@@ -31,5 +31,6 @@ export function useAuditTrail(
       filters.limit,
     ],
     queryFn: () => api.getAuditTrail({ clusterName, ...filters }),
+    placeholderData: keepPreviousData,
   });
 }

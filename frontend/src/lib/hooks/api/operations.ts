@@ -16,5 +16,6 @@ export function useOperationsCenter(
         limit,
       }),
     refetchInterval: 30_000,
+    staleTime: 25_000,
   });
 }

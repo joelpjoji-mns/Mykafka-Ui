@@ -26,28 +26,76 @@ export const ThemeModeContext = React.createContext<ThemeModeContextProps>({
   setThemeMode: () => {},
 });
 
+const THEME_MODES: readonly ThemeDropDownValue[] = [
+  'auto_theme',
+  'light_theme',
+  'dark_theme',
+  'midnight_theme',
+  'harbor_theme',
+  'ember_theme',
+  'amoled_theme',
+  'glass_theme',
+];
+
+const isThemeMode = (value: unknown): value is ThemeDropDownValue =>
+  THEME_MODES.includes(value as ThemeDropDownValue);
+
+const getStoredThemeMode = (): ThemeDropDownValue => {
+  try {
+    const mode = localStorage.getItem('mode');
+    return isThemeMode(mode) ? mode : 'auto_theme';
+  } catch {
+    return 'auto_theme';
+  }
+};
+
+const getDarkSchemeQuery = (): MediaQueryList | undefined =>
+  typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: dark)')
+    : undefined;
+
+const usePrefersDarkScheme = () => {
+  const [prefersDark, setPrefersDark] = React.useState(
+    () => !!getDarkSchemeQuery()?.matches
+  );
+
+  React.useEffect(() => {
+    const query = getDarkSchemeQuery();
+    if (!query) return undefined;
+
+    const handleChange = (event: { matches: boolean }) =>
+      setPrefersDark(event.matches);
+    setPrefersDark(!!query.matches);
+
+    if (typeof query.addEventListener === 'function') {
+      query.addEventListener('change', handleChange);
+      return () => query.removeEventListener?.('change', handleChange);
+    }
+    // Safari < 14 only supports the legacy listener API.
+    query.addListener?.(handleChange);
+    return () => query.removeListener?.(handleChange);
+  }, []);
+
+  return prefersDark;
+};
+
 export const ThemeModeProvider: FC<PropsWithChildren<unknown>> = ({
   children,
 }) => {
-  const matchDark = window.matchMedia('(prefers-color-scheme: dark)');
   const [themeMode, setThemeModeState] =
-    React.useState<ThemeDropDownValue>('auto_theme');
-
-  React.useLayoutEffect(() => {
-    const mode = localStorage.getItem('mode');
-    setThemeModeState((mode as ThemeDropDownValue) ?? 'auto_theme');
-  }, [setThemeModeState]);
+    React.useState<ThemeDropDownValue>(getStoredThemeMode);
+  const prefersDark = usePrefersDarkScheme();
 
   const isDarkMode = React.useMemo(() => {
     if (themeMode === 'auto_theme') {
-      return matchDark.matches;
+      return prefersDark;
     }
     return (
       themeMode === 'dark_theme' ||
       themeMode === 'midnight_theme' ||
       themeMode === 'amoled_theme'
     );
-  }, [themeMode]);
+  }, [prefersDark, themeMode]);
 
   const activeTheme = React.useMemo(() => {
     switch (themeMode) {

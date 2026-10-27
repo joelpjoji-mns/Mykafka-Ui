@@ -25,6 +25,18 @@ export const getSearchQueryKey = (params: URLSearchParams) =>
     params.get('searchScope'),
   ]);
 
+interface SearchDraft {
+  terms: string;
+  match: string;
+  scope: string;
+}
+
+const getDraftFromParams = (params: URLSearchParams): SearchDraft => ({
+  terms: params.getAll(MessagesFilterKeys.stringFilter).join(', '),
+  match: params.get('searchMatch') || 'ANY',
+  scope: params.get('searchScope') || 'ALL',
+});
+
 const SearchControls: React.FC<{
   hasSearched: boolean;
   resultsAvailable?: boolean;
@@ -34,14 +46,20 @@ const SearchControls: React.FC<{
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
   const { data: settings } = useDownloadSettings(clusterName, topicName);
   const download = useDownloadMessagesZip();
-  const [draft, setDraft] = useLocalStorage(
-    `topic-search-${JSON.stringify([clusterName, topicName])}`,
-    {
-      terms: params.getAll(MessagesFilterKeys.stringFilter).join(', '),
-      match: params.get('searchMatch') || 'ANY',
-      scope: params.get('searchScope') || 'ALL',
-    }
+  // A search in the URL (e.g. a shared link) takes precedence over the saved draft
+  // until the user edits it.
+  const [urlDraft, setUrlDraft] = React.useState<SearchDraft | undefined>(() =>
+    params
+      .getAll(MessagesFilterKeys.stringFilter)
+      .some((term) => term.trim() !== '')
+      ? getDraftFromParams(params)
+      : undefined
   );
+  const [storedDraft, setDraft] = useLocalStorage<SearchDraft>(
+    `topic-search-${JSON.stringify([clusterName, topicName])}`,
+    getDraftFromParams(params)
+  );
+  const draft = urlDraft ?? storedDraft;
   const { terms, match, scope } = draft;
   const searchTerms = React.useMemo(
     () => [
@@ -90,7 +108,7 @@ const SearchControls: React.FC<{
     }, 300);
     return () => window.clearTimeout(timer);
   }, [searchTerms, tooManyTerms, match, scope]);
-  const updateDraft = (changes: Partial<typeof draft>) => {
+  const updateDraft = (changes: Partial<SearchDraft>) => {
     const nextDraft = { ...draft, ...changes };
     const count = new Set(
       nextDraft.terms
@@ -99,6 +117,11 @@ const SearchControls: React.FC<{
         .filter(Boolean)
     ).size;
     onSearch(null, count > 0 && count <= SEARCH_TERM_LIMIT);
+    if (urlDraft) {
+      setUrlDraft(undefined);
+      setDraft(nextDraft);
+      return;
+    }
     setDraft((current) => ({ ...current, ...changes }));
   };
   const exportResults = () => {
@@ -108,8 +131,8 @@ const SearchControls: React.FC<{
       topicName,
       limit: Number(exportLimit),
       stringFilters: params.getAll(MessagesFilterKeys.stringFilter),
-      searchMatch: params.get('searchMatch') || 'ALL',
-      searchScope: params.get('searchScope') || 'ALL',
+      searchMatch: params.get('searchMatch') || match,
+      searchScope: params.get('searchScope') || scope,
       downloadMode:
         !mode || mode === PollingMode.TAILING ? PollingMode.LATEST : mode,
       partitions: params

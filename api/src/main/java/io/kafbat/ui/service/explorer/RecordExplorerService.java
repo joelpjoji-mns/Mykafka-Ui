@@ -15,10 +15,12 @@ import java.util.List;
 import java.util.function.Predicate;
 import javax.annotation.Nullable;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class RecordExplorerService {
@@ -72,20 +74,26 @@ public class RecordExplorerService {
                                         String topic,
                                         Predicate<TopicMessageDTO> filter,
                                         int sampleLimit) {
-    ConsumerRecordDeserializer deserializer = deserializationService.deserializerFor(
-        cluster,
-        topic,
-        null,
-        null);
-    return recentTopicSampler.sample(cluster, topic, sampleLimit)
-        .map(sample -> new TopicSample(
-            topic,
-            sample.records().size(),
-            sample.records().stream()
-                .map(deserializer::deserialize)
-                .filter(filter)
-                .map(message -> toRecord(topic, message))
-                .toList()));
+    return Mono.defer(() -> {
+      ConsumerRecordDeserializer deserializer = deserializationService.deserializerFor(
+          cluster,
+          topic,
+          null,
+          null);
+      return recentTopicSampler.sample(cluster, topic, sampleLimit)
+          .map(sample -> new TopicSample(
+              topic,
+              sample.records().size(),
+              sample.records().stream()
+                  .map(deserializer::deserialize)
+                  .filter(filter)
+                  .map(message -> toRecord(topic, message))
+                  .toList()));
+    }).onErrorResume(e -> {
+      // A deleted topic, broken serde or transient broker error must not fail the whole search.
+      log.warn("Record explorer could not sample topic {}: {}", topic, e.getMessage());
+      return Mono.just(new TopicSample(topic, 0, List.of()));
+    });
   }
 
   private RecordExplorerResponseDTO response(String query,

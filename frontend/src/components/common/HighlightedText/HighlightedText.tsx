@@ -1,15 +1,24 @@
 import React from 'react';
 import styled from 'styled-components';
 
-export const getSearchMatches = (text: string, terms: string[]) => {
+const buildSearchPattern = (terms: string[]) => {
   const escaped = [...new Set(terms.filter(Boolean))]
     .sort((left, right) => right.length - left.length)
     .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  if (escaped.length === 0) return [];
-  return [...text.matchAll(new RegExp(escaped.join('|'), 'g'))].map(
-    (match) => ({ start: match.index, end: match.index + match[0].length })
-  );
+  return escaped.length === 0 ? undefined : new RegExp(escaped.join('|'), 'g');
 };
+
+// matchAll clones the pattern, so a shared global RegExp is safe to reuse.
+const findMatches = (text: string, pattern: RegExp | undefined) =>
+  pattern
+    ? [...text.matchAll(pattern)].map((match) => ({
+        start: match.index,
+        end: match.index + match[0].length,
+      }))
+    : [];
+
+export const getSearchMatches = (text: string, terms: string[]) =>
+  findMatches(text, buildSearchPattern(terms));
 
 const Match = styled.mark`
   background: #ffda66;
@@ -21,7 +30,11 @@ const HighlightedText: React.FC<{ text: string; terms: string[] }> = ({
   text,
   terms,
 }) => {
-  const matches = getSearchMatches(text, terms);
+  const pattern = React.useMemo(() => buildSearchPattern(terms), [terms]);
+  const matches = React.useMemo(
+    () => findMatches(text, pattern),
+    [text, pattern]
+  );
   let previousEnd = 0;
   return (
     <>

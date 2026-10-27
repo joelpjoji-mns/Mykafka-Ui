@@ -28,6 +28,18 @@ describe('TimeRangeSelector', () => {
     expect(screen.getByText(/UTC[+-]\d{2}:\d{2}/)).toBeInTheDocument();
   });
 
+  it('labels the badge with the browser timezone used by the date pickers', () => {
+    setup();
+    const browserTimezone =
+      Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const badge = screen.getByText(/UTC[+-]\d{2}:\d{2}/);
+    expect(badge).toHaveAttribute(
+      'title',
+      expect.stringContaining(`Browser timezone (${browserTimezone}, UTC`)
+    );
+    expect(badge.getAttribute('title')).not.toMatch(/Application timezone/);
+  });
+
   it('applies "Last 1 day" preset with a 24h window ending near now', async () => {
     const { onApply } = setup();
     const before = Date.now();

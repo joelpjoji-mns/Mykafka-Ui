@@ -20,6 +20,7 @@ export function useAuthSettings() {
     queryKey: ['app', 'authSettings'],
     queryFn: () => appConfig.getAuthenticationSettings(),
     ...QUERY_REFETCH_OFF_OPTIONS,
+    staleTime: Infinity,
   });
 }
 
@@ -51,6 +52,8 @@ export function useAppInfo() {
         response,
       };
     },
+    // Invalidated explicitly after sign-in.
+    staleTime: Infinity,
   });
 }
 
@@ -58,6 +61,8 @@ export function useAppConfig() {
   return useSuspenseQuery({
     queryKey: ['app', 'config'],
     queryFn: () => appConfig.getCurrentConfig(),
+    // Invalidated by useUpdateAppConfig after a config change.
+    staleTime: Infinity,
   });
 }
 

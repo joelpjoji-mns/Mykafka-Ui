@@ -15,5 +15,6 @@ export function useLatestVersion() {
     queryKey: ['versionInfo'],
     queryFn: fetchLatestVersionInfo,
     ...QUERY_REFETCH_OFF_OPTIONS,
+    staleTime: 60 * 60_000,
   });
 }

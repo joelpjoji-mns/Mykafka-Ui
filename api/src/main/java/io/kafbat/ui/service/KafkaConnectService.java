@@ -114,6 +114,16 @@ public class KafkaConnectService {
     );
   }
 
+  /**
+   * Connector status and task details without resolving each connector's topics, which costs an
+   * extra Connect REST call per connector.
+   */
+  Flux<InternalConnectorInfo> getAllConnectorInfosWithoutTopics(final KafkaCluster cluster) {
+    return Flux.fromIterable(
+            Optional.ofNullable(cluster.getOriginalProperties().getKafkaConnect()).orElse(List.of()))
+        .flatMap(connect -> getConnectConnectors(cluster, connect));
+  }
+
   Flux<InternalConnectorInfo> getAllConnectorInfos(final KafkaCluster cluster) {
     return getConnects(cluster, false)
         .flatMap(connect ->

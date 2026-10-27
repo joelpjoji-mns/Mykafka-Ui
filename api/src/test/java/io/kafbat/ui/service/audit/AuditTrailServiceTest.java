@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.kafbat.ui.exception.ValidationException;
@@ -65,6 +67,26 @@ class AuditTrailServiceTest {
     assertThat(secondPage.getEvents()).extracting(event -> event.getOperation())
         .containsExactly("createTopic");
     assertThat(secondPage.getNextCursor()).isNull();
+  }
+
+  @Test
+  void keepsCursorsValidAcrossManyConcurrentQueriesAndReusesRecentReads() {
+    when(auditService.getAuditTopic(cluster)).thenReturn(Optional.of(AUDIT_TOPIC));
+    when(recordsLoader.load(cluster, AUDIT_TOPIC)).thenReturn(new AuditTrailService.AuditReadResult(List.of(
+        record("2026-08-15T12:00:00Z", "deleteTopic", "orders", true),
+        record("2026-08-15T11:00:00Z", "createTopic", "orders", true)
+    ), false));
+
+    var firstPage = service.getAuditTrail(cluster, query(null, null, null, null, null, 1)).block();
+    for (int i = 0; i < 100; i++) {
+      service.getAuditTrail(cluster, query("orders", null, null, null, null, 1)).block();
+    }
+    var secondPage = service.getAuditTrail(cluster,
+        query(null, null, null, firstPage.getNextCursor(), null, 1)).block();
+
+    assertThat(secondPage.getEvents()).extracting(event -> event.getOperation())
+        .containsExactly("createTopic");
+    verify(recordsLoader, times(1)).load(cluster, AUDIT_TOPIC);
   }
 
   @Test

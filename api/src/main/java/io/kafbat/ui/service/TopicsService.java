@@ -161,6 +161,17 @@ public class TopicsService {
     return loadTopic(cluster, topicName);
   }
 
+  /**
+   * Cheap existence check (single describe call) for endpoints that do not need configs, offsets
+   * or metrics.
+   */
+  public Mono<Void> ensureTopicExists(KafkaCluster cluster, String topicName) {
+    return adminClientService.get(cluster)
+        .flatMap(ac -> ac.describeTopic(topicName))
+        .switchIfEmpty(Mono.error(TopicNotFoundException::new))
+        .then();
+  }
+
   public Mono<List<ConfigEntry>> getTopicConfigs(KafkaCluster cluster, String topicName) {
     // there 2 case that we cover here:
     // 1. topic not found/visible - describeTopic() will be empty and we will throw TopicNotFoundException

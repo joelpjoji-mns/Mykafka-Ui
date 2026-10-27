@@ -13,6 +13,7 @@ import Select from 'components/common/Select/Select';
 import useAppParams from 'lib/hooks/useAppParams';
 import { useGetSchemasVersions } from 'lib/hooks/api/schemas';
 import ResourcePageHeading from 'components/common/ResourcePageHeading/ResourcePageHeading';
+import { prettyPrintJson } from 'lib/utils/prettyPrintJson';
 
 import * as S from './Diff.styled';
 import { BackButton } from './Diff.styled';
@@ -42,11 +43,11 @@ const Diff: React.FC = () => {
       allVersions.find((s) => s.version === version)?.schema ||
       (allVersions.length ? allVersions[0].schema : '');
     return selectedSchema.trim().startsWith('{')
-      ? JSON.stringify(JSON.parse(selectedSchema), null, '\t')
+      ? prettyPrintJson(selectedSchema)
       : selectedSchema;
   };
   const getSchemaType = (allVersions: SchemaSubject[]) => {
-    return allVersions[0].schemaType;
+    return allVersions[0]?.schemaType;
   };
 
   const methods = useForm({ mode: 'onChange' });

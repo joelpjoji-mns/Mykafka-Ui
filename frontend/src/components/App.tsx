@@ -68,11 +68,6 @@ const queryClient = new QueryClient({
       retry: 1,
       retryDelay: 500,
     },
-    mutations: {
-      onError(error) {
-        showServerError(error as unknown as Response);
-      },
-    },
   },
 });
 const App: React.FC = () => {

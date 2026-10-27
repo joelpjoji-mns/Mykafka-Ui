@@ -25,7 +25,7 @@ public class ConnectorTriageService {
   private final KafkaConnectService kafkaConnectService;
 
   public Flux<ConnectorTriageConnectorDTO> getTriage(KafkaCluster cluster) {
-    return kafkaConnectService.getAllConnectorInfos(cluster).map(this::toTriageConnector);
+    return kafkaConnectService.getAllConnectorInfosWithoutTopics(cluster).map(this::toTriageConnector);
   }
 
   public ConnectorTriageSnapshotDTO snapshot(List<ConnectorTriageConnectorDTO> connectors) {

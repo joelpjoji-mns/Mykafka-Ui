@@ -118,6 +118,60 @@ describe('AuditExplorer', () => {
     );
   });
 
+  it('keeps filters visible and blocks paging while the next page loads', async () => {
+    const { rerender } = render(<AuditExplorer />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() =>
+      expect(useAuditTrail).toHaveBeenLastCalledWith(
+        'local',
+        expect.objectContaining({ cursor: 'page-two' })
+      )
+    );
+
+    (useAuditTrail as jest.Mock).mockReturnValue({
+      data: response,
+      error: undefined,
+      isLoading: false,
+      isFetching: true,
+      isPlaceholderData: true,
+      refetch,
+    });
+    rerender(<AuditExplorer />);
+
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Resource')).toBeInTheDocument();
+    expect(screen.getByText('Loading page 2…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(useAuditTrail).toHaveBeenLastCalledWith(
+      'local',
+      expect.objectContaining({ cursor: 'page-two' })
+    );
+  });
+
+  it('renders events that share timestamp, operator and operation', () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation();
+    (useAuditTrail as jest.Mock).mockReturnValue({
+      data: { ...response, events: [response.events[0], response.events[0]] },
+      error: undefined,
+      isLoading: false,
+      refetch,
+    });
+
+    render(<AuditExplorer />);
+
+    expect(screen.getAllByText('operator@example.com')).toHaveLength(2);
+    expect(
+      consoleError.mock.calls.some((args) =>
+        args.some((arg) => String(arg).includes('same key'))
+      )
+    ).toBe(false);
+    consoleError.mockRestore();
+  });
+
   it('shows the truthful unavailable state from the API', () => {
     (useAuditTrail as jest.Mock).mockReturnValue({
       data: {

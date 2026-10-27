@@ -55,8 +55,10 @@ public class TailingEmitter extends AbstractEmitter {
       sendPhase(sink, "Live polling");
       send(sink, snapshot.bufferedLiveRecords(), null);
 
+      // Each poll already emits a CONSUMING event that keeps the SSE stream alive, so the phase
+      // only needs to be announced once instead of on every poll.
+      sendPhase(sink, "Polling");
       while (!sink.isCancelled()) {
-        sendPhase(sink, "Polling");
         var polled = poll(sink, consumer);
         send(sink, polled, null);
       }
@@ -85,9 +87,13 @@ public class TailingEmitter extends AbstractEmitter {
     snapshotStartOffsets.forEach(consumer::seek);
     snapshotStartOffsets.forEach((partition, startOffset) -> {
       if (startOffset >= checkpointOffsets.get(partition)) {
+        // Already at the checkpoint: pause it so live records are not buffered without bound
+        // while other partitions are still loading history.
         fullyRead.add(partition);
+        paused.add(partition);
       }
     });
+    consumer.pause(paused);
 
     sendPhase(sink, "Loading recent messages");
     while (!sink.isCancelled() && fullyRead.size() < checkpointOffsets.size()) {

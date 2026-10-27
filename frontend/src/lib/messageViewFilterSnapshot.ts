@@ -4,9 +4,15 @@ import { TopicName } from 'lib/interfaces/topic';
 
 const storageKey = `${LOCAL_STORAGE_KEY_PREFIX}-message-view-filter-snapshots`;
 
+const MAX_SNAPSHOTS = 50;
+
 type Snapshots = Record<string, string>;
 
 const snapshotId = (clusterName: ClusterName, topicName: TopicName) =>
+  JSON.stringify([clusterName, topicName]);
+
+// Ids written before snapshots were keyed by JSON tuples.
+const legacySnapshotId = (clusterName: ClusterName, topicName: TopicName) =>
   `${clusterName}:${topicName}`;
 
 const readSnapshots = (): Snapshots => {
@@ -40,7 +46,15 @@ export const saveMessageViewFilterSnapshot = (
 ) => {
   try {
     const snapshots = readSnapshots();
-    snapshots[snapshotId(clusterName, topicName)] = searchParams.toString();
+    const id = snapshotId(clusterName, topicName);
+    // Re-insert so key order reflects recency, then drop the oldest entries.
+    delete snapshots[id];
+    delete snapshots[legacySnapshotId(clusterName, topicName)];
+    snapshots[id] = searchParams.toString();
+    const ids = Object.keys(snapshots);
+    ids.slice(0, Math.max(0, ids.length - MAX_SNAPSHOTS)).forEach((staleId) => {
+      delete snapshots[staleId];
+    });
     sessionStorage.setItem(storageKey, JSON.stringify(snapshots));
   } catch {
     // Session storage is optional in embedded or privacy-restricted browser contexts.
@@ -51,6 +65,9 @@ export const getMessageViewFilterSnapshot = (
   clusterName: ClusterName,
   topicName: TopicName
 ): URLSearchParams | undefined => {
-  const serialized = readSnapshots()[snapshotId(clusterName, topicName)];
+  const snapshots = readSnapshots();
+  const serialized =
+    snapshots[snapshotId(clusterName, topicName)] ??
+    snapshots[legacySnapshotId(clusterName, topicName)];
   return serialized === undefined ? undefined : new URLSearchParams(serialized);
 };

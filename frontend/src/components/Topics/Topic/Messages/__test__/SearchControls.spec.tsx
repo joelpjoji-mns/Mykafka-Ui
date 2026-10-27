@@ -4,6 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { render, WithRoute } from 'lib/testHelpers';
 import { clusterTopicPath } from 'lib/paths';
 import SearchControls from 'components/Topics/Topic/Messages/SearchControls';
+import { LOCAL_STORAGE_KEY_PREFIX } from 'lib/constants';
+
+const draftStorageKey = `${LOCAL_STORAGE_KEY_PREFIX}-topic-search-${JSON.stringify(
+  ['cluster', 'topic']
+)}`;
 
 const mutate = jest.fn();
 const onSearch = jest.fn();
@@ -112,6 +117,61 @@ describe('Search controls', () => {
     );
     expect(mutate).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 20000 })
+    );
+  });
+
+  it('prefers a search from the URL over the saved draft', async () => {
+    localStorage.setItem(
+      draftStorageKey,
+      JSON.stringify({ terms: 'stored', match: 'ALL', scope: 'HEADERS' })
+    );
+    renderControls(
+      '?mode=EARLIEST&stringFilter=shared&searchMatch=ANY&searchScope=ALL'
+    );
+    const input = screen.getByRole('textbox', { name: 'Search terms' });
+    expect(input).toHaveValue('shared');
+    await waitFor(() =>
+      expect(onSearch).toHaveBeenLastCalledWith(
+        JSON.stringify([['shared'], 'ANY', 'ALL'])
+      )
+    );
+
+    await userEvent.type(input, ',next');
+    expect(input).toHaveValue('shared,next');
+    expect(JSON.parse(localStorage.getItem(draftStorageKey) || '{}')).toEqual({
+      terms: 'shared,next',
+      match: 'ANY',
+      scope: 'ALL',
+    });
+  });
+
+  it('restores the saved draft when the URL has no search', async () => {
+    localStorage.setItem(
+      draftStorageKey,
+      JSON.stringify({ terms: 'stored', match: 'ALL', scope: 'HEADERS' })
+    );
+    renderControls();
+    expect(screen.getByRole('textbox', { name: 'Search terms' })).toHaveValue(
+      'stored'
+    );
+    await waitFor(() =>
+      expect(onSearch).toHaveBeenLastCalledWith(
+        JSON.stringify([['stored'], 'ALL', 'HEADERS'])
+      )
+    );
+  });
+
+  it('exports with the selected match options before they reach the URL', async () => {
+    renderControls('?mode=EARLIEST&stringFilter=abc');
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Download matching results (NDJSON)' })
+    );
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stringFilters: ['abc'],
+        searchMatch: 'ANY',
+        searchScope: 'ALL',
+      })
     );
   });
 

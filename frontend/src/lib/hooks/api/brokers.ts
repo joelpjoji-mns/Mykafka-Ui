@@ -25,7 +25,8 @@ export function useBrokers(
   return useQuery<Broker[], ServerResponse>({
     queryKey: ['clusters', clusterName, 'brokers'],
     queryFn: () => apiFetch(() => api.getBrokers({ clusterName })),
-    refetchInterval: 5000,
+    // The backend serves brokers from a periodically refreshed cache.
+    refetchInterval: 10_000,
     ...queryOptions,
   });
 }

@@ -7,6 +7,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,12 +29,16 @@ public class StaticController {
 
   @GetMapping(value = "/index.html", produces = {"text/html"})
   public Mono<ResponseEntity<String>> getIndex(ServerWebExchange exchange) {
-    return Mono.just(ResponseEntity.ok(getRenderedFile(exchange, renderedIndexFile, indexFile)));
+    return Mono.just(ResponseEntity.ok()
+        .cacheControl(CacheControl.noCache())
+        .body(getRenderedFile(exchange, renderedIndexFile, indexFile)));
   }
 
   @GetMapping(value = "/manifest.json", produces = {"application/json"})
   public Mono<ResponseEntity<String>> getManifest(ServerWebExchange exchange) {
-    return Mono.just(ResponseEntity.ok(getRenderedFile(exchange, renderedManifestFile, manifestFile)));
+    return Mono.just(ResponseEntity.ok()
+        .cacheControl(CacheControl.noCache())
+        .body(getRenderedFile(exchange, renderedManifestFile, manifestFile)));
   }
 
   public String getRenderedFile(ServerWebExchange exchange, AtomicReference<String> renderedFile, Resource file) {

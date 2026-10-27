@@ -83,6 +83,9 @@ public class FullScanEmitter extends AbstractEmitter {
           send(sink, recordsInSnapshot, null);
 
           for (var partition : offsetsForSeek.keySet()) {
+            if (pausedPartitions.contains(partition)) {
+              continue;
+            }
             long position = consumer.position(partition);
             long endOffset = endOffsets.get(partition);
             if (position >= endOffset) {

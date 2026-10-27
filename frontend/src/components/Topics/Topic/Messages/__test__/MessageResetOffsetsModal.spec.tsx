@@ -173,6 +173,34 @@ describe('MessageResetOffsetsModal', () => {
     });
   });
 
+  it('requires a valid message timestamp for a timestamp reset', async () => {
+    const messageWithoutTimestamp = {
+      ...message,
+      timestamp: undefined,
+    } as unknown as TopicMessage;
+    render(
+      <MessageResetOffsetsModal
+        message={messageWithoutTimestamp}
+        onClose={onClose}
+      />
+    );
+
+    await selectConsumerGroup('orders-primary');
+    expect(screen.getByRole('button', { name: 'Reset offset' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('listbox', { name: 'Reset type' }));
+    await userEvent.click(screen.getByRole('option', { name: 'TIMESTAMP' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'This message has no valid timestamp'
+    );
+    expect(screen.getByRole('button', { name: 'Reset offset' })).toBeDisabled();
+    expect(useConsumerGroupOffsetsResetPreview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false })
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Reset offset' }));
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
   it('waits for an active consumer group by default and allows opting out', async () => {
     render(<MessageResetOffsetsModal message={message} onClose={onClose} />);
 

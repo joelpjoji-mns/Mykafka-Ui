@@ -76,6 +76,44 @@ class RecordExplorerServiceTest {
   }
 
   @Test
+  void topicThatCannotBeSampledDoesNotFailTheWholeSearch() {
+    RecentTopicSampler sampler = Mockito.mock(RecentTopicSampler.class);
+    DeserializationService deserializationService = Mockito.mock(DeserializationService.class);
+    ConsumerRecordDeserializer ordersDeserializer = Mockito.mock(ConsumerRecordDeserializer.class);
+    KafkaCluster cluster = KafkaCluster.builder().name("local").build();
+    ConsumerRecord<Bytes, Bytes> orderRecord = record("orders", 0, 4L);
+
+    Mockito.when(sampler.sample(cluster, "orders", 25))
+        .thenReturn(Mono.just(new RecentTopicSampler.Sample(List.of(orderRecord), 1)));
+    Mockito.when(sampler.sample(cluster, "deleted", 25))
+        .thenReturn(Mono.error(new IllegalStateException("topic deleted")));
+    Mockito.when(deserializationService.deserializerFor(cluster, "orders", null, null))
+        .thenReturn(ordersDeserializer);
+    Mockito.when(deserializationService.deserializerFor(cluster, "deleted", null, null))
+        .thenReturn(Mockito.mock(ConsumerRecordDeserializer.class));
+    Mockito.when(ordersDeserializer.deserialize(orderRecord))
+        .thenReturn(
+            message(
+                0,
+                4L,
+                "order-4",
+                "customer-42",
+                OffsetDateTime.of(2026, 8, 15, 10, 0, 0, 0, ZoneOffset.UTC)));
+
+    var response = new RecordExplorerService(sampler, deserializationService)
+        .search(cluster, List.of("orders", "deleted"), "customer",
+            new RecordExplorerService.Limits(8, 25, 100))
+        .block();
+
+    assertThat(response.getRecords())
+        .extracting(record -> record.getTopic() + ":" + record.getOffset())
+        .containsExactly("orders:4");
+    assertThat(response.getCoverage())
+        .extracting(coverage -> coverage.getTopic() + ":" + coverage.getSampledRecords())
+        .containsExactly("deleted:0", "orders:1");
+  }
+
+  @Test
   void boundsExplorerLimits() {
     RecordExplorerService service =
         new RecordExplorerService(

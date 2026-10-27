@@ -1,11 +1,14 @@
 package io.kafbat.ui.service;
 
+import com.github.benmanes.caffeine.cache.AsyncCache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.kafbat.ui.model.InternalPartition;
 import io.kafbat.ui.model.InternalTopic;
 import io.kafbat.ui.model.InternalTopicConfig;
 import io.kafbat.ui.model.InternalTopicConsumerGroup;
 import io.kafbat.ui.model.KafkaCluster;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,11 +29,30 @@ public class TopicDeveloperInsightsService {
   private static final long LAG_WARNING_THRESHOLD = 10_000L;
   private static final long LAG_CRITICAL_THRESHOLD = 1_000_000L;
 
+  private static final Duration INSIGHTS_CACHE_TTL = Duration.ofSeconds(15);
+
   private final TopicsService topicsService;
   private final ConsumerGroupService consumerGroupService;
   private final KafkaConnectService kafkaConnectService;
 
+  // Insights fan out to topic, consumer group, producer and Kafka Connect APIs; tab switches and
+  // concurrent viewers of the same topic share one recent result instead of repeating them.
+  private final AsyncCache<InsightsKey, Insights> insightsCache = Caffeine.newBuilder()
+      .expireAfterWrite(INSIGHTS_CACHE_TTL)
+      .maximumSize(500)
+      .buildAsync();
+
+  private record InsightsKey(String clusterName, String topicName) {
+  }
+
   public Mono<Insights> getInsights(KafkaCluster cluster, String topicName) {
+    InsightsKey key = new InsightsKey(cluster.getName(), topicName);
+    return Mono.fromFuture(
+        () -> insightsCache.get(key, (ignored, executor) -> loadInsights(cluster, topicName).toFuture()),
+        true);
+  }
+
+  private Mono<Insights> loadInsights(KafkaCluster cluster, String topicName) {
     Mono<InternalTopic> topic = topicsService.getTopicDetails(cluster, topicName);
     Mono<List<InternalTopicConsumerGroup>> consumers =
         consumerGroupService.getConsumerGroupsForTopic(cluster, topicName).onErrorReturn(List.of());

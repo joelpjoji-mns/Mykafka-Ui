@@ -79,6 +79,38 @@ describe('CommandPalette', () => {
     expect(screen.getByLabelText('Command palette search')).toBeInTheDocument();
   });
 
+  it('leaves the shortcut to Ace editors and already handled events', () => {
+    renderComponent();
+    const editor = document.createElement('div');
+    editor.className = 'ace_editor';
+    const textarea = document.createElement('textarea');
+    editor.appendChild(textarea);
+    document.body.appendChild(editor);
+
+    const editorEvent = new KeyboardEvent('keydown', {
+      key: 'k',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(textarea, editorEvent);
+    expect(editorEvent.defaultPrevented).toBe(false);
+
+    const handledEvent = new KeyboardEvent('keydown', {
+      key: 'k',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    handledEvent.preventDefault();
+    fireEvent(document.body, handledEvent);
+
+    expect(
+      screen.queryByLabelText('Command palette search')
+    ).not.toBeInTheDocument();
+    editor.remove();
+  });
+
   it('shows matching results and navigates on click', async () => {
     renderComponent();
     openPalette();

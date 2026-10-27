@@ -132,6 +132,7 @@ export function useTopicDeveloperInsights(
   return useQuery<TopicDeveloperInsights, ServerResponse>({
     queryKey: topicKeys.developerInsights(props),
     queryFn: () => apiFetch(() => api.getTopicDeveloperInsights(props)),
+    staleTime: 60_000,
     ...queryOptions,
   });
 }
@@ -397,7 +398,8 @@ export function useTopicAnalysis(
     queryKey: topicKeys.statistics(props),
     queryFn: () => api.getTopicAnalysis(props),
     enabled,
-    refetchInterval: 1000,
+    // Only poll while an analysis is running.
+    refetchInterval: (query) => (query.state.data?.progress ? 1000 : false),
     throwOnError: true,
     retry: false,
   });
@@ -445,5 +447,6 @@ export function useTopicDataProfile(
     queryFn: () =>
       apiFetch(() => api.getTopicDataProfile({ ...props, sampleLimit })),
     placeholderData: (previousData) => previousData,
+    staleTime: 60_000,
   });
 }

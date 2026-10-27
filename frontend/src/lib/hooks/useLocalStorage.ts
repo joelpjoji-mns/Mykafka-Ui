@@ -6,6 +6,7 @@ import {
   Dispatch,
   SetStateAction,
   useCallback,
+  useRef,
 } from 'react';
 
 const subscribers = new Map<string, Set<() => void>>();
@@ -60,29 +61,33 @@ export const useLocalStorage = <T>(
   defaultValue: T
 ): [T, Dispatch<SetStateAction<T>>] => {
   const key = `${LOCAL_STORAGE_KEY_PREFIX}-${featureKey}`;
+  // Kept in a ref so inline default values don't resubscribe on every render.
+  const defaultValueRef = useRef(defaultValue);
+  defaultValueRef.current = defaultValue;
 
   const [value, setValue] = useState<T>(() =>
     getStorageValue(key, defaultValue)
   );
+  const latestValueRef = useRef(value);
 
   const setStoredValue = useCallback<Dispatch<SetStateAction<T>>>(
     (newValue) => {
-      setValue((prevValue) => {
-        const valueToStore =
-          typeof newValue === 'function'
-            ? (newValue as (prevState: T) => T)(prevValue)
-            : newValue;
+      const valueToStore =
+        typeof newValue === 'function'
+          ? (newValue as (prevState: T) => T)(latestValueRef.current)
+          : newValue;
 
-        setStorageValue(key, valueToStore);
-        return valueToStore;
-      });
+      latestValueRef.current = valueToStore;
+      setValue(valueToStore);
+      setStorageValue(key, valueToStore);
     },
     [key]
   );
 
   useEffect(() => {
     const handleStorageChange = () => {
-      const newValue = getStorageValue(key, defaultValue);
+      const newValue = getStorageValue(key, defaultValueRef.current);
+      latestValueRef.current = newValue;
       setValue(newValue);
     };
 
@@ -100,7 +105,7 @@ export const useLocalStorage = <T>(
       unsubscribe();
       window.removeEventListener('storage', handleStorageEvent);
     };
-  }, [key, defaultValue]);
+  }, [key]);
 
   return [value, setStoredValue];
 };

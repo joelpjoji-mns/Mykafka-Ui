@@ -37,12 +37,17 @@ const resetTypeOptions: SelectOption<ConsumerGroupOffsetsResetType>[] =
 const messagesLabel = (count: number) =>
   `${count} ${count === 1 ? 'message' : 'messages'}`;
 
-const timestampToMillis = (timestamp: unknown) => {
-  const value =
-    timestamp instanceof Date
-      ? timestamp.getTime()
-      : new Date(String(timestamp)).getTime();
-  return Number.isFinite(value) ? value : Date.now();
+const timestampToMillis = (timestamp: unknown): number | undefined => {
+  let value = Number.NaN;
+  if (timestamp instanceof Date) {
+    value = timestamp.getTime();
+  } else if (typeof timestamp === 'number') {
+    value = timestamp;
+  } else if (typeof timestamp === 'string' && timestamp.trim()) {
+    value = new Date(timestamp).getTime();
+  }
+  // Kafka reports a missing record timestamp as -1.
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
 };
 const impactSummary = (preview: ConsumerGroupOffsetsResetPartitionPreview) => {
   switch (preview.impact) {
@@ -102,7 +107,10 @@ const MessageResetOffsetsModal: React.FC<MessageResetOffsetsModalProps> = ({
       ];
     }
 
-    if (resetType === ConsumerGroupOffsetsResetType.TIMESTAMP) {
+    if (
+      resetType === ConsumerGroupOffsetsResetType.TIMESTAMP &&
+      resetToTimestamp !== undefined
+    ) {
       payload.resetToTimestamp = resetToTimestamp;
     }
 
@@ -120,6 +128,10 @@ const MessageResetOffsetsModal: React.FC<MessageResetOffsetsModalProps> = ({
     waitForInactive,
   ]);
 
+  const isTimestampMissing =
+    resetType === ConsumerGroupOffsetsResetType.TIMESTAMP &&
+    resetToTimestamp === undefined;
+
   const {
     data: resetPreview,
     isError: isResetPreviewError,
@@ -129,13 +141,16 @@ const MessageResetOffsetsModal: React.FC<MessageResetOffsetsModalProps> = ({
     clusterName,
     consumerGroupID: consumerGroupId || '',
     reset: resetPayload,
-    enabled: Boolean(consumerGroupId),
+    enabled: Boolean(consumerGroupId) && !isTimestampMissing,
   });
 
-  const partitionPreview = resetPreview?.partitions.find(
-    ({ partition }) => partition === message.partition
-  );
-  const isPreviewLoading = isResetPreviewLoading || isResetPreviewFetching;
+  const partitionPreview = isTimestampMissing
+    ? undefined
+    : resetPreview?.partitions.find(
+        ({ partition }) => partition === message.partition
+      );
+  const isPreviewLoading =
+    !isTimestampMissing && (isResetPreviewLoading || isResetPreviewFetching);
 
   const matchingConsumerGroups = React.useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -163,7 +178,7 @@ const MessageResetOffsetsModal: React.FC<MessageResetOffsetsModalProps> = ({
     }));
 
   const reset = async () => {
-    if (!consumerGroupId) return;
+    if (!consumerGroupId || isTimestampMissing) return;
 
     const completed = await resetOffsets.mutateAsync(resetPayload);
     if (completed === false) return;
@@ -189,7 +204,12 @@ const MessageResetOffsetsModal: React.FC<MessageResetOffsetsModalProps> = ({
           <ActionButton
             buttonType="primary"
             buttonSize="M"
-            disabled={!consumerGroupId || !partitionPreview || isPreviewLoading}
+            disabled={
+              !consumerGroupId ||
+              isTimestampMissing ||
+              !partitionPreview ||
+              isPreviewLoading
+            }
             inProgress={resetOffsets.isPending}
             onClick={reset}
             permission={{
@@ -251,6 +271,12 @@ const MessageResetOffsetsModal: React.FC<MessageResetOffsetsModalProps> = ({
             onChange={setResetType}
             minWidth="100%"
           />
+          {isTimestampMissing && (
+            <S.PlanError role="alert">
+              This message has no valid timestamp, so the offset cannot be reset
+              by timestamp. Choose another reset type.
+            </S.PlanError>
+          )}
         </S.Field>
         {consumerGroupId && (
           <S.ActiveGroupOption>

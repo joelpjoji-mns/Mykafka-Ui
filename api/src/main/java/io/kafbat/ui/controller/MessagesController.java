@@ -249,11 +249,19 @@ public class MessagesController extends AbstractController implements MessagesAp
     Flux<TopicMessageEventDTO> messagesFlux;
     String orderBy = firstQueryParam(exchange, "orderBy");
     if (orderBy != null) {
-      messagesFlux = messagesService.loadSortedTopicMessages(
-          getCluster(clusterName), topicName, stringFilter, smartFilterId, limit, keySerde, valueSerde,
-          searchOption(exchange, "searchMatch", "ALL", "ANY"),
-          searchOption(exchange, "searchScope", "ALL", "HEADERS"),
-          orderBy, Optional.ofNullable(firstQueryParam(exchange, "sortOrder")).orElse("ASC"));
+      var cluster = getCluster(clusterName);
+      boolean matchAny = searchOption(exchange, "searchMatch", "ALL", "ANY");
+      boolean headersOnly = searchOption(exchange, "searchScope", "ALL", "HEADERS");
+      String sortOrder = Optional.ofNullable(firstQueryParam(exchange, "sortOrder")).orElse("ASC");
+      if (cursor != null) {
+        messagesFlux = messagesService.loadSortedTopicMessagePage(
+            cluster, topicName, cursor, limit, stringFilter, smartFilterId, keySerde, valueSerde,
+            matchAny, headersOnly, orderBy, sortOrder);
+      } else {
+        messagesFlux = messagesService.loadSortedTopicMessages(
+            cluster, topicName, stringFilter, smartFilterId, limit, keySerde, valueSerde,
+            matchAny, headersOnly, orderBy, sortOrder);
+      }
     } else if (cursor != null) {
       messagesFlux = messagesService.loadMessages(getCluster(clusterName), topicName, cursor);
     } else {

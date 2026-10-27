@@ -17,6 +17,7 @@ import io.kafbat.ui.service.metrics.scrape.KafkaConnectState;
 import io.kafbat.ui.service.metrics.scrape.ScrapedClusterState;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,33 +47,46 @@ public class StatisticsService {
   private record LoadQuorumInfoResult(Optional<QuorumInfo> quorumInfo, ControllerType controllerType) {}
 
   private Mono<Statistics> getStatistics(KafkaCluster cluster) {
-    return adminClientService.get(cluster).flatMap(ac ->
-        ac.describeCluster()
-            .flatMap(description ->
-                ac.updateInternalStats(description.getController())
-                    .then(
-                        Mono.zip(
-                            featureService.getAvailableFeatures(ac, cluster, description),
-                            loadClusterState(description, ac),
-                            loadKafkaConnects(cluster),
-                            loadQuorumInfo(ac)
-                                .map(quorumInfo -> new LoadQuorumInfoResult(Optional.of(quorumInfo), KRAFT))
-                                .onErrorResume(StatisticsService::handleQuorumInfoErrors)))
-                        .flatMap(t ->
-                            scrapeMetrics(cluster, t.getT2(), description)
-                                .map(metrics -> createStats(description,
-                                    t.getT1(),
-                                    t.getT2(),
-                                    t.getT3(),
-                                    metrics,
-                                    t.getT4(),
-                                    ac))
-                        )
-                    )
-            ).doOnError(e ->
-                log.error("Failed to collect cluster {} info", cluster.getName(), e)
-            ).doOnError(e -> adminClientService.invalidate(cluster, e))
-            .onErrorResume(t -> Mono.just(Statistics.statsUpdateError(t)));
+    return Mono.defer(() -> {
+      var connectionConfirmed = new AtomicBoolean();
+      return adminClientService.get(cluster)
+          .flatMap(ac ->
+              ac.describeCluster()
+                  .doOnNext(description -> connectionConfirmed.set(true))
+                  .flatMap(description ->
+                      ac.updateInternalStats(description.getController())
+                          .then(
+                              Mono.zip(
+                                  featureService.getAvailableFeatures(ac, cluster, description)
+                                      .doOnNext(features -> cache.markConnected(
+                                          cluster,
+                                          Statistics.connected(ac.getVersion(), features, description)
+                                      )),
+                                  loadClusterState(description, ac),
+                                  loadKafkaConnects(cluster),
+                                  loadQuorumInfo(ac)
+                                      .map(quorumInfo ->
+                                          new LoadQuorumInfoResult(Optional.of(quorumInfo), KRAFT))
+                                      .onErrorResume(StatisticsService::handleQuorumInfoErrors))
+                                  .flatMap(t ->
+                                      scrapeMetrics(cluster, t.getT2(), description)
+                                          .map(metrics -> createStats(
+                                              description,
+                                              t.getT1(),
+                                              t.getT2(),
+                                              t.getT3(),
+                                              metrics,
+                                              t.getT4(),
+                                              ac))
+                                  )
+                          )
+                  )
+                  .doOnError(e -> adminClientService.invalidate(cluster, ac, e))
+          )
+          .doOnError(e -> log.error("Failed to collect cluster {} info", cluster.getName(), e))
+          .onErrorResume(t -> Mono.just(Statistics.statsUpdateError(
+              t, cache.get(cluster), connectionConfirmed.get())));
+    });
   }
 
   private static Mono<LoadQuorumInfoResult> handleQuorumInfoErrors(Throwable quorumInfoFetchError) {
@@ -103,6 +117,7 @@ public class StatisticsService {
                                  ReactiveAdminClient ac) {
     var stats = Statistics.builder()
         .status(ServerStatusDTO.ONLINE)
+        .connectionStatus(ServerStatusDTO.ONLINE)
         .clusterDescription(description)
         .version(ac.getVersion())
         .metrics(metrics)

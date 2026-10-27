@@ -33,6 +33,7 @@ class MessagesProcessing {
   private final ConsumerRecordDeserializer deserializer;
   private final Predicate<TopicMessageDTO> filter;
   private boolean ascendingSortBeforeSend;
+  private boolean sortRecordsBeforeSend = true;
   private @Nullable Integer limit;
 
   static MessagesProcessing create(
@@ -43,6 +44,13 @@ class MessagesProcessing {
     MessagesProcessing processing = new MessagesProcessing(deserializer, filter);
     processing.ascendingSortBeforeSend = ascendingSortBeforeSend;
     processing.limit = limit;
+    return processing;
+  }
+
+  static MessagesProcessing createUnsorted(
+      ConsumerRecordDeserializer deserializer, Predicate<TopicMessageDTO> filter) {
+    MessagesProcessing processing = create(deserializer, filter, true, null);
+    processing.sortRecordsBeforeSend = false;
     return processing;
   }
 
@@ -59,7 +67,10 @@ class MessagesProcessing {
   void send(FluxSink<TopicMessageEventDTO> sink,
             Iterable<ConsumerRecord<Bytes, Bytes>> polled,
             @Nullable Cursor.Tracking cursor) {
-    sortForSending(polled, ascendingSortBeforeSend)
+    Iterable<ConsumerRecord<Bytes, Bytes>> recordsToSend = sortRecordsBeforeSend
+        ? sortForSending(polled, ascendingSortBeforeSend)
+        : polled;
+    Streams.stream(recordsToSend)
         .forEach(rec -> {
           if (!limitReached() && !sink.isCancelled()) {
             TopicMessageDTO topicMessage = deserializer.deserialize(rec);

@@ -31,9 +31,95 @@ interface UseTopicMessagesProps {
 }
 
 const EMPTY_STRING_FILTERS: string[] = [];
+const PROVISIONAL_SORT_RESULTS_PHASE = 'Provisional sort results';
+const FINAL_SORT_RESULTS_PHASE = 'Final sort results';
+const SORTED_PAGE_RESULTS_PHASE = 'Sorted page results';
+const SORTED_PAGE_COMPLETE_PHASE = 'Sorted page results complete';
+const SORT_RESULTS_COMPLETE_PHASE =
+  /^(Provisional|Final) sort results complete$/;
 type PendingMessage = {
   message: TopicMessage;
   shouldPrepend: boolean;
+};
+
+interface CachedSortedPage {
+  messages: TopicMessage[];
+  nextCursor?: string;
+  estimatedBytes: number;
+  expiresAt: number;
+}
+
+const MAX_CACHED_SORTED_PAGES = 2;
+const MAX_CACHED_SORTED_PAGE_BYTES = 64 * 1024 * 1024;
+const SORTED_PAGE_CACHE_TTL_MS = 30 * 60 * 1_000;
+const cachedSortedPages = new Map<string, CachedSortedPage>();
+let cachedSortedPageBytes = 0;
+
+const estimateSortedPageBytes = (messages: TopicMessage[]) =>
+  messages.reduce((total, message) => {
+    const headersBytes = Object.entries(message.headers || {}).reduce(
+      (size, [key, value]) => size + (key.length + (value?.length || 0)) * 2,
+      0
+    );
+    return (
+      total +
+      Math.max((message.key?.length || 0) * 2, message.keySize || 0) +
+      Math.max((message.value?.length || 0) * 2, message.valueSize || 0) +
+      headersBytes +
+      256
+    );
+  }, 0);
+
+const getCachedSortedPage = (key: string) => {
+  const entry = cachedSortedPages.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    cachedSortedPageBytes -= entry.estimatedBytes;
+    cachedSortedPages.delete(key);
+    return undefined;
+  }
+  cachedSortedPages.delete(key);
+  cachedSortedPages.set(key, entry);
+  return entry;
+};
+
+const cacheSortedPage = (
+  key: string,
+  messages: TopicMessage[],
+  nextCursor?: string
+) => {
+  const estimatedBytes = estimateSortedPageBytes(messages);
+  if (estimatedBytes > MAX_CACHED_SORTED_PAGE_BYTES) return;
+
+  const existing = cachedSortedPages.get(key);
+  if (existing) {
+    cachedSortedPageBytes -= existing.estimatedBytes;
+    cachedSortedPages.delete(key);
+  }
+
+  while (
+    cachedSortedPages.size >= MAX_CACHED_SORTED_PAGES ||
+    cachedSortedPageBytes + estimatedBytes > MAX_CACHED_SORTED_PAGE_BYTES
+  ) {
+    const oldestKey = cachedSortedPages.keys().next().value;
+    if (!oldestKey) break;
+    const oldest = cachedSortedPages.get(oldestKey);
+    if (oldest) cachedSortedPageBytes -= oldest.estimatedBytes;
+    cachedSortedPages.delete(oldestKey);
+  }
+
+  cachedSortedPages.set(key, {
+    messages,
+    nextCursor,
+    estimatedBytes,
+    expiresAt: Date.now() + SORTED_PAGE_CACHE_TTL_MS,
+  });
+  cachedSortedPageBytes += estimatedBytes;
+};
+
+export const clearCachedSortedMessagePages = () => {
+  cachedSortedPages.clear();
+  cachedSortedPageBytes = 0;
 };
 
 const scheduleMessageFlush = (callback: FrameRequestCallback) => {
@@ -182,7 +268,7 @@ export const useTopicMessages = ({
   stringFilters = EMPTY_STRING_FILTERS,
   enabled = true,
 }: UseTopicMessagesProps) => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const requestIdentity = JSON.stringify([
     clusterName,
     topicName,
@@ -199,7 +285,12 @@ export const useTopicMessages = ({
     React.useState<TopicMessageConsuming>();
   const [isFetching, setIsFetching] = React.useState(false);
   const [isLiveStreamReady, setIsLiveStreamReady] = React.useState(false);
+  const [isProvisionalRanking, setIsProvisionalRanking] = React.useState(false);
   const liveStreamReadyRef = useRef(false);
+  const sortedScanSnapshot = useRef<TopicMessage[] | null>(null);
+  const provisionalSortedPage = useRef<TopicMessage[]>([]);
+  const completedSortedPage = useRef<TopicMessage[] | null>(null);
+  const finalRankingReceived = useRef(false);
   const abortController = useRef<AbortController | undefined>(undefined);
   const pendingMessages = useRef<PendingMessage[]>([]);
   const scheduledMessageFlush = useRef<number | undefined>(undefined);
@@ -221,7 +312,12 @@ export const useTopicMessages = ({
     if (!controller || controller.signal.aborted) return;
 
     clearPendingMessages();
+    sortedScanSnapshot.current = null;
+    provisionalSortedPage.current = [];
+    completedSortedPage.current = null;
+    finalRankingReceived.current = false;
     setIsFetching(false);
+    setIsProvisionalRanking(false);
     controller.abort();
   }, [clearPendingMessages]);
 
@@ -237,16 +333,53 @@ export const useTopicMessages = ({
     setActiveIdentity(requestIdentity);
     setIsFetching(enabled);
     setIsLiveStreamReady(false);
+    setIsProvisionalRanking(false);
+    sortedScanSnapshot.current = null;
+    provisionalSortedPage.current = [];
+    completedSortedPage.current = null;
+    finalRankingReceived.current = false;
     liveStreamReadyRef.current = false;
     if (!enabled) {
       controller.abort();
       return undefined;
     }
 
+    const cachedPage = searchParams.has('orderBy')
+      ? getCachedSortedPage(requestIdentity)
+      : undefined;
+    if (cachedPage) {
+      setMessages(cachedPage.messages);
+      useMessageFiltersStore.getState().setNextCursor(cachedPage.nextCursor);
+      setIsFetching(false);
+      return () => {
+        controller.abort();
+        clearPendingMessages();
+        if (abortController.current === controller) {
+          abortController.current = undefined;
+        }
+      };
+    }
+
     const isCurrentRequest = () =>
       currentIdentity.current === requestIdentity &&
       abortController.current === controller &&
       !controller.signal.aborted;
+
+    const publishSortedSnapshot = (
+      snapshot: TopicMessage[],
+      isComplete: boolean
+    ) => {
+      if (isComplete) {
+        completedSortedPage.current = snapshot;
+        startTransition(() => setMessages(snapshot));
+        return;
+      }
+
+      if (snapshot.length >= provisionalSortedPage.current.length) {
+        provisionalSortedPage.current = snapshot;
+        startTransition(() => setMessages(snapshot));
+      }
+    };
 
     const mode = searchParams.has('orderBy')
       ? PollingMode.EARLIEST
@@ -380,11 +513,26 @@ export const useTopicMessages = ({
       const { nextCursor, setNextCursor } = useMessageFiltersStore.getState();
 
       const currentCursor = getCursorValue(searchParams);
-      const requestKey = requestParams.toString();
+      const requestKey = JSON.stringify([
+        clusterName,
+        topicName,
+        requestParams.toString(),
+      ]);
+      if (
+        searchParams.has('orderBy') &&
+        currentCursor > 0 &&
+        (!nextCursor || requestKey !== prevRequestKey.current)
+      ) {
+        setNextCursor(undefined);
+        setSearchParams((params) => {
+          params.delete(MessagesFilterKeys.cursor);
+          return params;
+        });
+        return;
+      }
 
       // filters stay the same and we have cursor set cursor
       if (
-        !searchParams.has('orderBy') &&
         requestKey === prevRequestKey.current &&
         nextCursor &&
         prevCursor.current < currentCursor
@@ -402,7 +550,14 @@ export const useTopicMessages = ({
         if (!isCurrentRequest() || errorReported) return;
         errorReported = true;
         setNextCursor(undefined);
+        clearPendingMessages();
+        sortedScanSnapshot.current = null;
+        finalRankingReceived.current = false;
+        setMessages([]);
         setIsFetching(false);
+        setIsProvisionalRanking(false);
+        provisionalSortedPage.current = [];
+        completedSortedPage.current = null;
         showServerError(error);
       };
 
@@ -432,7 +587,20 @@ export const useTopicMessages = ({
               message.timestamp = new Date(message.timestamp);
             }
 
-            if (
+            if (parsedData.type === TopicMessageEventTypeEnum.DONE) {
+              setNextCursor(cursor?.id || undefined);
+              if (
+                searchParams.has('orderBy') &&
+                completedSortedPage.current !== null
+              ) {
+                cacheSortedPage(
+                  requestIdentity,
+                  completedSortedPage.current,
+                  cursor?.id
+                );
+                completedSortedPage.current = null;
+              }
+            } else if (
               cursor &&
               useMessageFiltersStore.getState().nextCursor !== cursor.id
             ) {
@@ -442,6 +610,10 @@ export const useTopicMessages = ({
             switch (parsedData.type) {
               case TopicMessageEventTypeEnum.MESSAGE:
                 if (message) {
+                  if (searchParams.has('orderBy')) {
+                    sortedScanSnapshot.current?.push(message);
+                    break;
+                  }
                   const shouldPrependLiveMessage =
                     mode === PollingMode.TAILING && liveStreamReadyRef.current;
                   queueMessage(message, shouldPrependLiveMessage);
@@ -449,6 +621,54 @@ export const useTopicMessages = ({
                 break;
               case TopicMessageEventTypeEnum.PHASE:
                 if (parsedData.phase?.name) {
+                  if (
+                    parsedData.phase.name === PROVISIONAL_SORT_RESULTS_PHASE ||
+                    parsedData.phase.name === FINAL_SORT_RESULTS_PHASE
+                  ) {
+                    if (sortedScanSnapshot.current !== null) {
+                      publishSortedSnapshot(
+                        sortedScanSnapshot.current,
+                        finalRankingReceived.current
+                      );
+                    }
+                    sortedScanSnapshot.current = [];
+                    finalRankingReceived.current =
+                      parsedData.phase.name === FINAL_SORT_RESULTS_PHASE;
+                    setIsProvisionalRanking(true);
+                    setPhase(undefined);
+                    break;
+                  }
+                  if (parsedData.phase.name === SORTED_PAGE_RESULTS_PHASE) {
+                    sortedScanSnapshot.current = [];
+                    finalRankingReceived.current = false;
+                    setIsProvisionalRanking(false);
+                    setPhase(undefined);
+                    break;
+                  }
+                  if (parsedData.phase.name === SORTED_PAGE_COMPLETE_PHASE) {
+                    if (sortedScanSnapshot.current !== null) {
+                      publishSortedSnapshot(sortedScanSnapshot.current, true);
+                      sortedScanSnapshot.current = null;
+                    }
+                    setIsProvisionalRanking(false);
+                    setPhase(undefined);
+                    break;
+                  }
+                  if (SORT_RESULTS_COMPLETE_PHASE.test(parsedData.phase.name)) {
+                    if (sortedScanSnapshot.current !== null) {
+                      publishSortedSnapshot(
+                        sortedScanSnapshot.current,
+                        finalRankingReceived.current
+                      );
+                      sortedScanSnapshot.current = null;
+                    }
+                    if (finalRankingReceived.current) {
+                      finalRankingReceived.current = false;
+                      setIsProvisionalRanking(false);
+                    }
+                    setPhase(undefined);
+                    break;
+                  }
                   setPhase(parsedData.phase.name);
                   if (
                     mode === PollingMode.TAILING &&
@@ -471,6 +691,18 @@ export const useTopicMessages = ({
                 cancelMessageFlush(scheduledMessageFlush.current);
               }
               flushPendingMessages();
+              const hasUnfinishedSortSnapshot =
+                sortedScanSnapshot.current !== null;
+              if (sortedScanSnapshot.current !== null) {
+                publishSortedSnapshot(
+                  sortedScanSnapshot.current,
+                  finalRankingReceived.current
+                );
+                sortedScanSnapshot.current = null;
+              }
+              if (finalRankingReceived.current && !hasUnfinishedSortSnapshot) {
+                setIsProvisionalRanking(false);
+              }
               setIsFetching(false);
             }
           },
@@ -517,20 +749,25 @@ export const useTopicMessages = ({
     isFetching: enabled && (activeIdentity !== requestIdentity || isFetching),
     isLiveStreamReady:
       activeIdentity === requestIdentity && enabled && isLiveStreamReady,
+    isProvisionalRanking:
+      activeIdentity === requestIdentity && enabled && isProvisionalRanking,
     abortFetchData,
   };
 };
 
-export function useSerdes(props: GetSerdesRequest) {
+export const serdesQueryOptions = (props: GetSerdesRequest) => {
   const { clusterName, topicName, use } = props;
-
-  return useSuspenseQuery({
+  return {
     queryKey: ['clusters', clusterName, 'topics', topicName, 'serdes', use],
     queryFn: () => messagesApiClient.getSerdes(props),
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
-    refetchInterval: false,
-  });
+    refetchInterval: false as const,
+  };
+};
+
+export function useSerdes(props: GetSerdesRequest) {
+  return useSuspenseQuery(serdesQueryOptions(props));
 }
 
 export function useDownloadMessagesZip() {

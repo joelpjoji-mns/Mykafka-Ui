@@ -37,6 +37,8 @@ model Cluster {
   name: string;
   defaultCluster?: boolean;
   status: ServerStatus;
+  @doc("Cluster connectivity; statistics may still be initializing while this is ONLINE.")
+  connectionStatus: ServerStatus;
   lastError?: MetricsCollectionError;
   brokerCount?: int32;
   onlinePartitionCount?: int32;

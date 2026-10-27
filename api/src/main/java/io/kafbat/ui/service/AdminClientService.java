@@ -7,6 +7,6 @@ public interface AdminClientService extends AutoCloseable {
 
   Mono<ReactiveAdminClient> get(KafkaCluster cluster);
 
-  void invalidate(KafkaCluster cluster, Throwable e);
+  void invalidate(KafkaCluster cluster, ReactiveAdminClient client, Throwable e);
 
 }

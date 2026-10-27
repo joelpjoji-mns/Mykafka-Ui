@@ -11,6 +11,7 @@ import io.kafbat.ui.config.ClustersProperties;
 import io.kafbat.ui.emitter.BackwardEmitter;
 import io.kafbat.ui.emitter.Cursor;
 import io.kafbat.ui.emitter.ForwardEmitter;
+import io.kafbat.ui.emitter.FullScanEmitter;
 import io.kafbat.ui.emitter.MessageFilters;
 import io.kafbat.ui.emitter.TailingEmitter;
 import io.kafbat.ui.exception.TopicNotFoundException;
@@ -27,6 +28,8 @@ import io.kafbat.ui.model.SmartFilterTestExecutionDTO;
 import io.kafbat.ui.model.SmartFilterTestExecutionResultDTO;
 import io.kafbat.ui.model.TopicMessageDTO;
 import io.kafbat.ui.model.TopicMessageEventDTO;
+import io.kafbat.ui.model.TopicMessageNextPageCursorDTO;
+import io.kafbat.ui.model.TopicMessagePhaseDTO;
 import io.kafbat.ui.serde.api.SchemaDescription;
 import io.kafbat.ui.serde.api.Serde;
 import io.kafbat.ui.serdes.ConsumerRecordDeserializer;
@@ -41,17 +44,19 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.PriorityQueue;
+import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -89,6 +94,18 @@ public class MessagesService {
   private static final int MAX_UPLOAD_MESSAGE_LIMIT = 10_000;
   private static final int MAX_PRODUCER_REQUEST_BYTES = 16 * 1024 * 1024;
   private static final long MAX_PRODUCER_BUFFER_BYTES = 64L * 1024 * 1024;
+  private static final int SORTED_SCAN_FIRST_PREVIEW_SIZE = 1_000;
+  private static final int SORTED_SCAN_PREVIEW_INTERVAL = 50_000;
+  private static final long SORTED_SCAN_RAW_PREVIEW_INTERVAL = 50_000;
+  private static final long SORTED_SCAN_NARROW_FILTER_PREVIEW_INTERVAL = 10_000;
+  private static final int SORTED_SCAN_PREVIEW_LIMIT = 1_000;
+  private static final long SORTED_SCAN_PREVIEW_BYTES = 8L * 1024 * 1024;
+  private static final String SORTED_SCAN_PREVIEW_PHASE = "Provisional sort results";
+  private static final String SORTED_SCAN_PREVIEW_COMPLETE_PHASE = "Provisional sort results complete";
+  private static final String SORTED_SCAN_FINAL_PHASE = "Final sort results";
+  private static final String SORTED_SCAN_FINAL_COMPLETE_PHASE = "Final sort results complete";
+  private static final String SORTED_PAGE_RESULTS_PHASE = "Sorted page results";
+  private static final String SORTED_PAGE_COMPLETE_PHASE = "Sorted page results complete";
 
   private static final String INVALID_ZIP_ENTRY_CHARS = "[\\\\/:*?\"<>|\\p{Cntrl}]";
 
@@ -103,6 +120,7 @@ public class MessagesService {
       CacheBuilder.newBuilder().maximumSize(PollingCursorsStorage.MAX_SIZE).build();
 
   private final PollingCursorsStorage cursorsStorage = new PollingCursorsStorage();
+  private final SortedTopicMessagePages sortedTopicMessagePages = new SortedTopicMessagePages();
 
   public MessagesService(
       AdminClientService adminClientService,
@@ -605,7 +623,7 @@ public class MessagesService {
     if (timestampTo != null) {
       filter = filter.and(message -> matchesTimestampUpperBound(message, timestampTo));
     }
-    return loadMessages(
+    return loadMessagesFromPosition(
         cluster,
         topic,
         deserializationService.deserializerFor(cluster, topic, keySerde, valueSerde),
@@ -623,7 +641,7 @@ public class MessagesService {
                 () ->
                     new ValidationException(
                         "Next page cursor not found. Maybe it was evicted from cache."));
-    return loadMessages(
+    return loadMessagesFromPosition(
         cluster,
         topic,
         cursor.deserializer(),
@@ -642,43 +660,244 @@ public class MessagesService {
     return withExistingTopic(cluster, topic).flux()
         .publishOn(Schedulers.boundedElastic())
         .flatMap(ignored -> Flux.defer(() -> {
-          var top = new PriorityQueue<TopicMessageDTO>(resultLimit, order.reversed());
-          var done = new AtomicReference<TopicMessageEventDTO>();
           var position = ConsumerPosition.create(PollingModeDTO.EARLIEST, topic, List.of(), null, null);
           var deserializer = deserializationService.deserializerFor(cluster, topic, keySerde, valueSerde);
           var filter = getMsgFilter(stringFilters, filterId, matchAny, headersOnly);
-          var emitter = ForwardEmitter.fullScan(
+          var pageWriter = "size".equals(orderBy)
+              ? sortedTopicMessagePages.newWriter(
+                  "DESC".equals(sortOrder),
+                  Math.min(resultLimit, SORTED_SCAN_PREVIEW_LIMIT))
+              : null;
+          var pageSignature = sortedPageSignature(
+              cluster, topic, stringFilters, filterId, limit, keySerde, valueSerde,
+              matchAny, headersOnly, orderBy, sortOrder);
+          var emitter = new FullScanEmitter(
               () -> consumerGroupService.createConsumer(
                   cluster, Map.of(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1_000)),
-              position, 1_000, deserializer, filter, cluster.getPollingSettings(),
-              cursorsStorage.createNewCursor(deserializer, position, filter, resultLimit));
-          Flux<TopicMessageEventDTO> progress = Flux.<TopicMessageEventDTO>create(emitter)
-              .handle((event, sink) -> {
-                if (event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE) {
-                  var message = event.getMessage();
-                  if (top.size() < resultLimit) {
-                    top.add(message);
-                  } else if (order.compare(message, top.peek()) < 0) {
-                    top.poll();
-                    top.add(message);
-                  }
-                } else if (event.getType() == TopicMessageEventDTO.TypeEnum.DONE) {
-                  done.set(event);
-                } else {
-                  sink.next(event);
-                }
-              });
-          return progress.concatWith(Flux.defer(() -> {
-            var finish = done.get();
-            if (finish == null || finish.getConsuming().getFilterApplyErrors() > 0) {
-              return Flux.error(new ValidationException("Whole-topic scan did not complete successfully"));
-            }
-            return Flux.fromStream(top.stream().sorted(order))
-                .map(message -> new TopicMessageEventDTO()
-                    .type(TopicMessageEventDTO.TypeEnum.MESSAGE).message(message))
-                .concatWithValues(finish);
-          }));
+              position, deserializer, filter, cluster.getPollingSettings());
+          return scanAndSortMessages(
+              Flux.create(emitter),
+              order,
+              resultLimit,
+              pageWriter,
+              cluster.getName(),
+              topic,
+              pageSignature,
+              "DESC".equals(sortOrder));
         }));
+  }
+
+  public Flux<TopicMessageEventDTO> loadSortedTopicMessagePage(
+      KafkaCluster cluster,
+      String topic,
+      String cursorId,
+      @Nullable Integer limit,
+      @Nullable List<String> stringFilters,
+      @Nullable String filterId,
+      @Nullable String keySerde,
+      @Nullable String valueSerde,
+      boolean matchAny,
+      boolean headersOnly,
+      String orderBy,
+      String sortOrder) {
+    int pageSize = fixPageSize(limit);
+    String signature = sortedPageSignature(
+        cluster, topic, stringFilters, filterId, pageSize, keySerde, valueSerde,
+        matchAny, headersOnly, orderBy, sortOrder);
+    return Flux.defer(() -> {
+      var page = sortedTopicMessagePages.readPage(
+          cursorId, cluster.getName(), topic, signature, pageSize);
+      return Flux.concat(
+          Flux.just(sortedScanPhase(SORTED_PAGE_RESULTS_PHASE)),
+          Flux.fromIterable(page.messages().stream()
+              .map(MessagesService::sortedMessageEvent)
+              .toList()),
+          Flux.just(sortedScanPhase(SORTED_PAGE_COMPLETE_PHASE)),
+          Flux.just(new TopicMessageEventDTO()
+              .type(TopicMessageEventDTO.TypeEnum.DONE)
+              .cursor(page.nextCursor() == null
+                  ? null
+                  : new TopicMessageNextPageCursorDTO().id(page.nextCursor()))));
+    });
+  }
+
+  static Flux<TopicMessageEventDTO> sortScannedMessages(
+      Flux<TopicMessageEventDTO> scan, Comparator<TopicMessageDTO> order, int resultLimit) {
+    return scanAndSortMessages(scan, order, resultLimit, null, null, null, null, false);
+  }
+
+  static Flux<TopicMessageEventDTO> scanAndSortMessages(
+      Flux<TopicMessageEventDTO> scan,
+      Comparator<TopicMessageDTO> order,
+      int resultLimit,
+      @Nullable SortedTopicMessagePages.Writer pageWriter,
+      @Nullable String clusterName,
+      String topic,
+      @Nullable String pageSignature,
+      boolean descending) {
+    return Flux.defer(() -> {
+      PriorityQueue<TopicMessageDTO> top = pageWriter == null
+          ? new PriorityQueue<>(resultLimit, order.reversed())
+          : null;
+      var done = new AtomicReference<TopicMessageEventDTO>();
+      var messagesScanned = new AtomicLong();
+      var latestRawRecordCount = new AtomicLong();
+      var lastPreviewRawRecordCount = new AtomicLong();
+      Flux<TopicMessageEventDTO> progress = scan.concatMap(event -> {
+        if (event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE) {
+          var message = event.getMessage();
+          if (pageWriter != null) {
+            pageWriter.append(message);
+          } else if (top.size() < resultLimit) {
+            top.add(message);
+          } else if (order.compare(message, top.peek()) < 0) {
+            top.poll();
+            top.add(message);
+          }
+          long scanned = messagesScanned.incrementAndGet();
+          if (scanned == SORTED_SCAN_FIRST_PREVIEW_SIZE
+              || (scanned > SORTED_SCAN_FIRST_PREVIEW_SIZE
+              && scanned % SORTED_SCAN_PREVIEW_INTERVAL == 0)) {
+            lastPreviewRawRecordCount.set(latestRawRecordCount.get());
+            return Flux.fromIterable(provisionalSortedResults(
+                top, pageWriter, order, resultLimit, descending));
+          }
+          return Flux.empty();
+        }
+        if (event.getType() == TopicMessageEventDTO.TypeEnum.CONSUMING
+            && event.getConsuming() != null) {
+          int rawRecordCount =
+              Optional.ofNullable(event.getConsuming().getMessagesConsumed()).orElse(0);
+          latestRawRecordCount.set(rawRecordCount);
+          long rawPreviewInterval = messagesScanned.get() < SORTED_SCAN_FIRST_PREVIEW_SIZE
+              ? SORTED_SCAN_NARROW_FILTER_PREVIEW_INTERVAL
+              : SORTED_SCAN_RAW_PREVIEW_INTERVAL;
+          if (rawRecordCount - lastPreviewRawRecordCount.get()
+                  >= rawPreviewInterval
+              && hasSortedMessages(top, pageWriter)) {
+            lastPreviewRawRecordCount.set(rawRecordCount);
+            return Flux.concat(
+                Flux.just(event),
+                Flux.fromIterable(provisionalSortedResults(
+                    top, pageWriter, order, resultLimit, descending)));
+          }
+          return Flux.just(event);
+        }
+        if (event.getType() == TopicMessageEventDTO.TypeEnum.DONE) {
+          done.set(event);
+          return Flux.empty();
+        }
+        return Flux.just(event);
+      });
+      return progress.concatWith(Flux.defer(() -> {
+        var finish = done.get();
+        if (finish == null || finish.getConsuming().getFilterApplyErrors() > 0) {
+          return Flux.error(new ValidationException("Whole-topic scan did not complete successfully"));
+        }
+        List<TopicMessageEventDTO> finalRows;
+        if (pageWriter != null) {
+          SortedTopicMessagePages.Page page = pageWriter.finish(
+              clusterName, topic, pageSignature, resultLimit, descending);
+          if (page.nextCursor() != null) {
+            finish.setCursor(new TopicMessageNextPageCursorDTO().id(page.nextCursor()));
+          }
+          finalRows = page.messages().stream()
+              .map(MessagesService::sortedMessageEvent)
+              .toList();
+        } else {
+          finalRows = sortedMessages(top, order, resultLimit);
+        }
+        return Flux.concat(
+            Flux.just(sortedScanPhase(SORTED_SCAN_FINAL_PHASE)),
+            Flux.fromIterable(finalRows),
+            Flux.just(sortedScanPhase(SORTED_SCAN_FINAL_COMPLETE_PHASE)),
+            Flux.just(finish));
+      }));
+    }).doFinally(signalType -> {
+      if (pageWriter != null) {
+        pageWriter.close();
+      }
+    });
+  }
+
+  private String sortedPageSignature(
+      KafkaCluster cluster,
+      String topic,
+      @Nullable List<String> stringFilters,
+      @Nullable String filterId,
+      @Nullable Integer limit,
+      @Nullable String keySerde,
+      @Nullable String valueSerde,
+      boolean matchAny,
+      boolean headersOnly,
+      String orderBy,
+      String sortOrder) {
+    try {
+      String requestSignature = OBJECT_MAPPER.writeValueAsString(Arrays.asList(
+          cluster.getName(),
+          topic,
+          stringFilters,
+          filterId,
+          fixPageSize(limit),
+          keySerde,
+          valueSerde,
+          matchAny,
+          headersOnly,
+          orderBy,
+          sortOrder));
+      return Hashing.sha256().hashString(requestSignature, Charsets.UTF_8).toString();
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("Failed to create sorted messages cursor signature", e);
+    }
+  }
+
+  private static TopicMessageEventDTO sortedMessageEvent(TopicMessageDTO message) {
+    return new TopicMessageEventDTO()
+        .type(TopicMessageEventDTO.TypeEnum.MESSAGE)
+        .message(message);
+  }
+
+  private static List<TopicMessageEventDTO> sortedMessages(
+      PriorityQueue<TopicMessageDTO> messages, Comparator<TopicMessageDTO> order, int limit) {
+    return messages.stream()
+        .sorted(order)
+        .limit(limit)
+        .map(message -> new TopicMessageEventDTO()
+            .type(TopicMessageEventDTO.TypeEnum.MESSAGE).message(message))
+        .toList();
+  }
+
+  private static boolean hasSortedMessages(
+      @Nullable PriorityQueue<TopicMessageDTO> messages,
+      @Nullable SortedTopicMessagePages.Writer pageWriter) {
+    return pageWriter == null ? messages != null && !messages.isEmpty() : pageWriter.hasMessages();
+  }
+
+  private static List<TopicMessageEventDTO> provisionalSortedResults(
+      @Nullable PriorityQueue<TopicMessageDTO> messages,
+      @Nullable SortedTopicMessagePages.Writer pageWriter,
+      Comparator<TopicMessageDTO> order,
+      int resultLimit,
+      boolean descending) {
+    List<TopicMessageEventDTO> previewRows = pageWriter == null
+        ? sortedMessages(messages, order, Math.min(resultLimit, SORTED_SCAN_PREVIEW_LIMIT))
+        : pageWriter.preview(
+                Math.min(resultLimit, SORTED_SCAN_PREVIEW_LIMIT),
+                SORTED_SCAN_PREVIEW_BYTES,
+                descending).stream()
+            .map(MessagesService::sortedMessageEvent)
+            .toList();
+    List<TopicMessageEventDTO> results = new ArrayList<>(previewRows.size() + 2);
+    results.add(sortedScanPhase(SORTED_SCAN_PREVIEW_PHASE));
+    results.addAll(previewRows);
+    results.add(sortedScanPhase(SORTED_SCAN_PREVIEW_COMPLETE_PHASE));
+    return results;
+  }
+
+  private static TopicMessageEventDTO sortedScanPhase(String name) {
+    return new TopicMessageEventDTO()
+        .type(TopicMessageEventDTO.TypeEnum.PHASE)
+        .phase(new TopicMessagePhaseDTO().name(name));
   }
 
   static Comparator<TopicMessageDTO> topicMessageOrder(String column, String direction) {
@@ -709,7 +928,7 @@ public class MessagesService {
     };
   }
 
-  private Flux<TopicMessageEventDTO> loadMessages(
+  private Flux<TopicMessageEventDTO> loadMessagesFromPosition(
       KafkaCluster cluster,
       String topic,
       ConsumerRecordDeserializer deserializer,

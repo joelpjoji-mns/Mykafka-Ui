@@ -62,6 +62,7 @@ describe('Page Container', () => {
           {
             name: 'Cluster 1',
             status: ServerStatus.ONLINE,
+            connectionStatus: ServerStatus.ONLINE,
             controller: ControllerType.KRAFT,
           },
         ],

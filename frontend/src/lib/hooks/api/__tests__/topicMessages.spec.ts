@@ -7,8 +7,10 @@ import fetchMock from 'fetch-mock';
 import { UseQueryResult, UseSuspenseQueryResult } from '@tanstack/react-query';
 import { SerdeUsage, TopicMessageEventTypeEnum } from 'generated-sources';
 import { MESSAGES_PER_PAGE, MessagesFilterKeys } from 'lib/constants';
-import { MemoryRouter } from 'react-router-dom';
-import { createElement, type PropsWithChildren } from 'react';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { createElement, Fragment, type PropsWithChildren } from 'react';
+import { useMessageFiltersStore } from 'lib/hooks/useMessageFiltersStore';
+import { clearCachedSortedMessagePages } from 'lib/hooks/api/topicMessages';
 
 const clusterName = 'test-cluster';
 const topicName = 'test-topic';
@@ -57,6 +59,8 @@ describe('Topic Messages hooks', () => {
     .mockImplementation();
 
   beforeEach(() => {
+    useMessageFiltersStore.getState().setNextCursor(undefined);
+    clearCachedSortedMessagePages();
     fetchMock.restore();
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
@@ -139,6 +143,413 @@ describe('Topic Messages hooks', () => {
     expect(params.get('orderBy')).toBe('size');
     expect(params.get('sortOrder')).toBe('DESC');
     expect(params.get('limit')).toBe('1000');
+    unmount();
+  });
+
+  it('shows provisional sort results and replaces them with the final ranking', async () => {
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/?orderBy=size&sortOrder=DESC'] },
+        children
+      );
+    const { result, unmount } = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
+    const options = (fetchEventSource as jest.Mock).mock.calls[0][1];
+    await act(async () => {
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Provisional sort results' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 1, value: 'provisional' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Provisional sort results complete' },
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.isProvisionalRanking).toBe(true);
+      expect(result.current.messages.map(({ value }) => value)).toEqual([
+        'provisional',
+      ]);
+    });
+
+    await act(async () => {
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 1, offset: 2, value: 'final' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results complete' },
+        }),
+      });
+      options.onclose();
+    });
+
+    await waitFor(() => {
+      expect(result.current.isProvisionalRanking).toBe(false);
+      expect(result.current.messages.map(({ value }) => value)).toEqual([
+        'final',
+      ]);
+    });
+    unmount();
+  });
+
+  it('keeps provisional result counts from shrinking during the scan', async () => {
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/?orderBy=size&sortOrder=DESC'] },
+        children
+      );
+    const { result, unmount } = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
+    const options = (fetchEventSource as jest.Mock).mock.calls[0][1];
+    const emitPreview = (offsets: number[]) => {
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Provisional sort results' },
+        }),
+      });
+      offsets.forEach((offset) => {
+        options.onmessage({
+          data: JSON.stringify({
+            type: TopicMessageEventTypeEnum.MESSAGE,
+            message: { partition: 0, offset, value: `preview-${offset}` },
+          }),
+        });
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Provisional sort results complete' },
+        }),
+      });
+    };
+
+    await act(async () => emitPreview([1, 2, 3]));
+    await waitFor(() => expect(result.current.messages).toHaveLength(3));
+
+    await act(async () => emitPreview([4]));
+
+    expect(result.current.messages.map(({ value }) => value)).toEqual([
+      'preview-1',
+      'preview-2',
+      'preview-3',
+    ]);
+    unmount();
+  });
+
+  it('loads the next globally sorted page and clears the cursor at the end', async () => {
+    const navigation: { navigate?: ReturnType<typeof useNavigate> } = {};
+    const CaptureNavigation = () => {
+      navigation.navigate = useNavigate();
+      return null;
+    };
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/?orderBy=size&sortOrder=DESC'] },
+        createElement(
+          Fragment,
+          null,
+          children,
+          createElement(CaptureNavigation)
+        )
+      );
+    const { result, unmount } = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
+    const firstPageOptions = (fetchEventSource as jest.Mock).mock.calls[0][1];
+    await act(async () => {
+      firstPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results' },
+        }),
+      });
+      firstPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 1, value: 'page-1' },
+        }),
+      });
+      firstPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results complete' },
+        }),
+      });
+      firstPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.DONE,
+          cursor: { id: 'sorted-page-2' },
+        }),
+      });
+      firstPageOptions.onclose();
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages.map(({ value }) => value)).toEqual([
+        'page-1',
+      ]);
+      expect(useMessageFiltersStore.getState().nextCursor).toBe(
+        'sorted-page-2'
+      );
+    });
+
+    await act(async () => {
+      navigation.navigate?.('/?orderBy=size&sortOrder=DESC&cursor=1');
+    });
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(2));
+    const secondUrl = new URL(
+      (fetchEventSource as jest.Mock).mock.calls[1][0],
+      'http://localhost'
+    );
+    expect(secondUrl.searchParams.get('cursor')).toBe('sorted-page-2');
+
+    const secondPageOptions = (fetchEventSource as jest.Mock).mock.calls[1][1];
+    await act(async () => {
+      secondPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Sorted page results' },
+        }),
+      });
+      secondPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 1, offset: 2, value: 'page-2' },
+        }),
+      });
+      secondPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Sorted page results complete' },
+        }),
+      });
+      secondPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.DONE,
+          cursor: null,
+        }),
+      });
+      secondPageOptions.onclose();
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages.map(({ value }) => value)).toEqual([
+        'page-2',
+      ]);
+      expect(useMessageFiltersStore.getState().nextCursor).toBeUndefined();
+    });
+    unmount();
+  });
+
+  it('reuses completed sorted pages after leaving and returning to Messages', async () => {
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/?orderBy=size&sortOrder=DESC'] },
+        children
+      );
+    const firstRender = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
+    const options = (fetchEventSource as jest.Mock).mock.calls[0][1];
+    await act(async () => {
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 1, value: 'cached-page' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results complete' },
+        }),
+      });
+      options.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.DONE,
+          cursor: { id: 'cached-next-page' },
+        }),
+      });
+      options.onclose();
+    });
+
+    await waitFor(() =>
+      expect(
+        firstRender.result.current.messages.map(({ value }) => value)
+      ).toEqual(['cached-page'])
+    );
+    firstRender.unmount();
+
+    const secondRender = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper }
+    );
+    await waitFor(() =>
+      expect(
+        secondRender.result.current.messages.map(({ value }) => value)
+      ).toEqual(['cached-page'])
+    );
+    expect(useMessageFiltersStore.getState().nextCursor).toBe(
+      'cached-next-page'
+    );
+    expect(fetchEventSource).toHaveBeenCalledTimes(1);
+    secondRender.unmount();
+  });
+
+  it('requests the next sorted page with its cursor and clears Next at the end', async () => {
+    const navigation: { navigate?: ReturnType<typeof useNavigate> } = {};
+    const CaptureNavigation = () => {
+      navigation.navigate = useNavigate();
+      return null;
+    };
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/?orderBy=size&sortOrder=DESC'] },
+        createElement(
+          Fragment,
+          null,
+          children,
+          createElement(CaptureNavigation)
+        )
+      );
+    const { result, unmount } = renderHook(
+      () => hooks.useTopicMessages({ clusterName, topicName }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(1));
+    const firstPageOptions = (fetchEventSource as jest.Mock).mock.calls[0][1];
+    await act(async () => {
+      firstPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results' },
+        }),
+      });
+      firstPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 0, offset: 1, value: 'page-1' },
+        }),
+      });
+      firstPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Final sort results complete' },
+        }),
+      });
+      firstPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.DONE,
+          cursor: { id: 'sorted-page-2' },
+        }),
+      });
+      firstPageOptions.onclose();
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages.map(({ value }) => value)).toEqual([
+        'page-1',
+      ]);
+      expect(useMessageFiltersStore.getState().nextCursor).toBe(
+        'sorted-page-2'
+      );
+    });
+
+    await act(async () => {
+      navigation.navigate?.('/?orderBy=size&sortOrder=DESC&cursor=1');
+    });
+    await waitFor(() => expect(fetchEventSource).toHaveBeenCalledTimes(2));
+
+    const secondUrl = new URL(
+      (fetchEventSource as jest.Mock).mock.calls[1][0],
+      'http://localhost'
+    );
+    expect(secondUrl.searchParams.get('cursor')).toBe('sorted-page-2');
+
+    const secondPageOptions = (fetchEventSource as jest.Mock).mock.calls[1][1];
+    await act(async () => {
+      secondPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Sorted page results' },
+        }),
+      });
+      secondPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.MESSAGE,
+          message: { partition: 1, offset: 2, value: 'page-2' },
+        }),
+      });
+      secondPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.PHASE,
+          phase: { name: 'Sorted page results complete' },
+        }),
+      });
+      secondPageOptions.onmessage({
+        data: JSON.stringify({
+          type: TopicMessageEventTypeEnum.DONE,
+          cursor: null,
+        }),
+      });
+      secondPageOptions.onclose();
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages.map(({ value }) => value)).toEqual([
+        'page-2',
+      ]);
+      expect(useMessageFiltersStore.getState().nextCursor).toBeUndefined();
+    });
     unmount();
   });
 

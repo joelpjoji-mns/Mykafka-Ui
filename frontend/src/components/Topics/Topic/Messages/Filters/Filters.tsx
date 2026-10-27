@@ -327,7 +327,7 @@ const Filters: React.FC<FiltersProps> = ({
         alignItems="center"
         justifyContent="flex-start"
         flexWrap="wrap"
-        padding="8px 0 5px"
+        padding="4px 0"
       >
         <Button
           buttonType="secondary"

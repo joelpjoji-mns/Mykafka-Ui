@@ -20,7 +20,7 @@ const Nav: FC = () => {
           <ClusterMenu
             key={cluster.name}
             name={cluster.name}
-            status={cluster.status}
+            status={cluster.connectionStatus ?? cluster.status}
             features={cluster.features}
             opened={clusters.data.length === 1 || cluster.name === clusterName}
           />

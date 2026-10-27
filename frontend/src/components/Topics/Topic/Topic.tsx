@@ -1,10 +1,12 @@
 import React, { Suspense } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   NavLink,
   Route,
   Routes,
   useLocation,
   useNavigate,
+  useSearchParams,
 } from 'react-router-dom';
 import {
   clusterTopicAclsRelativePath,
@@ -37,36 +39,57 @@ import {
   useClearTopicMessages,
   useDeleteTopic,
   useRecreateTopic,
-  useTopicConnectors,
   useTopicDetails,
 } from 'lib/hooks/api/topics';
 import {
   Action,
   CleanUpPolicy,
+  PollingMode,
   ResourceType,
+  SerdeUsage,
   TopicMessage,
 } from 'generated-sources';
+import { MessagesFilterKeys } from 'lib/constants';
+import { serdesQueryOptions } from 'lib/hooks/api/topicMessages';
+import { scheduleIdleTask } from 'lib/utils/scheduleIdleTask';
 import PageLoader from 'components/common/PageLoader/PageLoader';
 import SlidingSidebar from 'components/common/SlidingSidebar';
 import useBoolean from 'lib/hooks/useBoolean';
 import { useProduceMessage } from 'lib/hooks/useProduceMessage';
 import ResourcePageHeading from 'components/common/ResourcePageHeading/ResourcePageHeading';
 import { TopicActionsProvider } from 'components/contexts/TopicActionsContext';
-import ErrorPage from 'components/ErrorPage/ErrorPage';
+import { showServerError } from 'lib/errorHandling';
 
-import Messages from './Messages/Messages';
-import Overview from './Overview/Overview';
-import Settings from './Settings/Settings';
-import TopicConsumerGroups from './ConsumerGroups/TopicConsumerGroups';
-import Statistics from './Statistics/Statistics';
-import Edit from './Edit/Edit';
-import Connectors from './Connectors/Connectors';
-import SendMessage from './SendMessage/SendMessage';
-import Acls from './Acls/Acls';
-import Download from './Download/Download';
-import Upload from './Upload/Upload';
-import DataProfile from './DataProfile/DataProfile';
-import DeveloperHub from './DeveloperHub/DeveloperHub';
+const loadErrorPage = () => import('components/ErrorPage/ErrorPage');
+const loadMessages = () => import('./Messages/Messages');
+const loadOverview = () => import('./Overview/Overview');
+const loadSettings = () => import('./Settings/Settings');
+const loadTopicConsumerGroups = () =>
+  import('./ConsumerGroups/TopicConsumerGroups');
+const loadStatistics = () => import('./Statistics/Statistics');
+const loadEdit = () => import('./Edit/Edit');
+const loadConnectors = () => import('./Connectors/Connectors');
+const loadSendMessage = () => import('./SendMessage/SendMessage');
+const loadAcls = () => import('./Acls/Acls');
+const loadDownload = () => import('./Download/Download');
+const loadUpload = () => import('./Upload/Upload');
+const loadDataProfile = () => import('./DataProfile/DataProfile');
+const loadDeveloperHub = () => import('./DeveloperHub/DeveloperHub');
+
+const ErrorPage = React.lazy(loadErrorPage);
+const Messages = React.lazy(loadMessages);
+const Overview = React.lazy(loadOverview);
+const Settings = React.lazy(loadSettings);
+const TopicConsumerGroups = React.lazy(loadTopicConsumerGroups);
+const Statistics = React.lazy(loadStatistics);
+const Edit = React.lazy(loadEdit);
+const Connectors = React.lazy(loadConnectors);
+const SendMessage = React.lazy(loadSendMessage);
+const Acls = React.lazy(loadAcls);
+const Download = React.lazy(loadDownload);
+const Upload = React.lazy(loadUpload);
+const DataProfile = React.lazy(loadDataProfile);
+const DeveloperHub = React.lazy(loadDeveloperHub);
 
 const Topic: React.FC = () => {
   const {
@@ -78,7 +101,32 @@ const Topic: React.FC = () => {
   const { messageData, setMessage, clearMessage } = useProduceMessage();
 
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
-  const { pathname } = useLocation();
+  const queryClient = useQueryClient();
+  const { pathname, search } = useLocation();
+  const [searchParams] = useSearchParams();
+  const topicPath = clusterTopicPath(clusterName, topicName);
+  const normalizedPathname = pathname.replace(/\/+$/, '');
+  const isMessagesRoute =
+    normalizedPathname === `${topicPath}/${clusterTopicMessagesRelativePath}`;
+  const isSearchRoute =
+    normalizedPathname === `${topicPath}/${clusterTopicSearchRelativePath}`;
+  const topicIdentity = `${clusterName}/${topicName}`;
+  const [messagesMountedForTopic, setMessagesMountedForTopic] = React.useState(
+    isMessagesRoute ? topicIdentity : ''
+  );
+  React.useEffect(() => {
+    if (isMessagesRoute) setMessagesMountedForTopic(topicIdentity);
+  }, [isMessagesRoute, topicIdentity]);
+  const hasVisitedMessages = messagesMountedForTopic === topicIdentity;
+  const messageMode = searchParams.get(MessagesFilterKeys.mode);
+  const isFiniteMessageView =
+    searchParams.has('orderBy') ||
+    (!!messageMode && messageMode !== PollingMode.TAILING);
+  const keepSortedScanAlive =
+    hasVisitedMessages &&
+    isFiniteMessageView &&
+    !isMessagesRoute &&
+    !isSearchRoute;
 
   const openSidebarWithMessage = (message: TopicMessage) => {
     setMessage(message);
@@ -93,14 +141,12 @@ const Topic: React.FC = () => {
   const navigate = useNavigate();
   const deleteTopic = useDeleteTopic(clusterName);
   const recreateTopic = useRecreateTopic({ clusterName, topicName });
-  const { data, error, isSuccess, refetch, isLoading, isRefetching } =
-    useTopicDetails({ clusterName, topicName }, { retry: false });
-  const { data: connectors = [] } = useTopicConnectors({
-    clusterName,
-    topicName,
-  });
+  const { data, error, refetch, isLoading } = useTopicDetails(
+    { clusterName, topicName },
+    { retry: false }
+  );
 
-  const { isReadOnly, isTopicDeletionAllowed } =
+  const { isReadOnly, isTopicDeletionAllowed, hasKafkaConnectConfigured } =
     React.useContext(ClusterContext);
 
   const deleteTopicHandler = async () => {
@@ -112,9 +158,55 @@ const Topic: React.FC = () => {
   const clearTopicMessagesHandler = async () => {
     await clearMessages.mutateAsync(topicName);
   };
-  const topicPath = clusterTopicPath(clusterName, topicName);
+  const withSearch = (path: string) => `${path}${search}`;
   const canCleanup = data?.cleanUpPolicy === CleanUpPolicy.DELETE;
-  const isConnectorsAvailable = connectors.length > 0;
+  const isConnectorsAvailable = hasKafkaConnectConfigured;
+
+  React.useEffect(() => {
+    if (!data) return undefined;
+
+    return scheduleIdleTask(() => {
+      const tabModules: Array<() => Promise<unknown>> = [
+        loadOverview,
+        loadMessages,
+        loadSettings,
+        loadTopicConsumerGroups,
+        loadStatistics,
+        loadEdit,
+        loadAcls,
+        loadDownload,
+        loadUpload,
+        loadDataProfile,
+        loadDeveloperHub,
+        loadSendMessage,
+      ];
+      if (isConnectorsAvailable) tabModules.push(loadConnectors);
+
+      Promise.all([
+        Promise.all(tabModules.map((loadModule) => loadModule())),
+        queryClient.prefetchQuery(
+          serdesQueryOptions({
+            clusterName,
+            topicName,
+            use: SerdeUsage.DESERIALIZE,
+          })
+        ),
+        queryClient.prefetchQuery(
+          serdesQueryOptions({
+            clusterName,
+            topicName,
+            use: SerdeUsage.SERIALIZE,
+          })
+        ),
+      ]).catch(showServerError);
+    });
+  }, [
+    clusterName,
+    data !== undefined,
+    isConnectorsAvailable,
+    queryClient,
+    topicName,
+  ]);
 
   return (
     <>
@@ -216,28 +308,32 @@ const Topic: React.FC = () => {
         </Dropdown>
       </ResourcePageHeading>
 
-      {(isLoading || isRefetching) && <PageLoader />}
+      {isLoading && !data && <PageLoader />}
 
-      {error && (
-        <ErrorPage
-          status={error.status}
-          onClick={refetch}
-          resourceName={topicName}
-        />
+      {error && !data && (
+        <Suspense fallback={<PageLoader />}>
+          <ErrorPage
+            status={error.status}
+            onClick={refetch}
+            resourceName={topicName}
+          />
+        </Suspense>
       )}
 
-      {isSuccess && (
+      {data && (
         <>
           <Navbar role="navigation">
             <NavLink
-              to={topicPath}
+              to={withSearch(topicPath)}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               end
             >
               Overview
             </NavLink>
             <ActionNavLink
-              to={`${topicPath}/${clusterTopicMessagesRelativePath}`}
+              to={withSearch(
+                `${topicPath}/${clusterTopicMessagesRelativePath}`
+              )}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               permission={{
                 resource: ResourceType.TOPIC,
@@ -248,7 +344,7 @@ const Topic: React.FC = () => {
               Messages
             </ActionNavLink>
             <ActionNavLink
-              to={`${topicPath}/${clusterTopicSearchRelativePath}`}
+              to={withSearch(`${topicPath}/${clusterTopicSearchRelativePath}`)}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               permission={{
                 resource: ResourceType.TOPIC,
@@ -259,7 +355,9 @@ const Topic: React.FC = () => {
               Search
             </ActionNavLink>
             <ActionNavLink
-              to={`${topicPath}/${clusterTopicDownloadRelativePath}`}
+              to={withSearch(
+                `${topicPath}/${clusterTopicDownloadRelativePath}`
+              )}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               permission={{
                 resource: ResourceType.TOPIC,
@@ -270,7 +368,7 @@ const Topic: React.FC = () => {
               Download
             </ActionNavLink>
             <ActionNavLink
-              to={`${topicPath}/${clusterTopicUploadRelativePath}`}
+              to={withSearch(`${topicPath}/${clusterTopicUploadRelativePath}`)}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               permission={{
                 resource: ResourceType.TOPIC,
@@ -281,19 +379,25 @@ const Topic: React.FC = () => {
               Upload
             </ActionNavLink>
             <NavLink
-              to={`${topicPath}/${clusterTopicConsumerGroupsRelativePath}`}
+              to={withSearch(
+                `${topicPath}/${clusterTopicConsumerGroupsRelativePath}`
+              )}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
             >
               Consumers
             </NavLink>
             <NavLink
-              to={`${topicPath}/${clusterTopicSettingsRelativePath}`}
+              to={withSearch(
+                `${topicPath}/${clusterTopicSettingsRelativePath}`
+              )}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
             >
               Settings
             </NavLink>
             <ActionNavLink
-              to={`${topicPath}/${clusterTopicStatisticsRelativePath}`}
+              to={withSearch(
+                `${topicPath}/${clusterTopicStatisticsRelativePath}`
+              )}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               permission={{
                 resource: ResourceType.TOPIC,
@@ -304,7 +408,9 @@ const Topic: React.FC = () => {
               Statistics
             </ActionNavLink>
             <ActionNavLink
-              to={`${topicPath}/${clusterTopicDataProfileRelativePath}`}
+              to={withSearch(
+                `${topicPath}/${clusterTopicDataProfileRelativePath}`
+              )}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               permission={{
                 resource: ResourceType.TOPIC,
@@ -315,7 +421,9 @@ const Topic: React.FC = () => {
               Profile
             </ActionNavLink>
             <ActionNavLink
-              to={`${topicPath}/${clusterTopicDeveloperRelativePath}`}
+              to={withSearch(
+                `${topicPath}/${clusterTopicDeveloperRelativePath}`
+              )}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               permission={{
                 resource: ResourceType.TOPIC,
@@ -326,7 +434,7 @@ const Topic: React.FC = () => {
               Developer
             </ActionNavLink>
             <ActionNavLink
-              to={`${topicPath}/${clusterTopicAclsRelativePath}`}
+              to={withSearch(`${topicPath}/${clusterTopicAclsRelativePath}`)}
               className={({ isActive }) => (isActive ? 'is-active' : '')}
               permission={{
                 resource: ResourceType.ACL,
@@ -337,7 +445,9 @@ const Topic: React.FC = () => {
             </ActionNavLink>
             {isConnectorsAvailable && (
               <ActionNavLink
-                to={`${topicPath}/${clusterTopicConnectorsRelativePath}`}
+                to={withSearch(
+                  `${topicPath}/${clusterTopicConnectorsRelativePath}`
+                )}
                 className={({ isActive }) => (isActive ? 'is-active' : '')}
                 permission={{
                   resource: ResourceType.TOPIC,
@@ -350,13 +460,16 @@ const Topic: React.FC = () => {
             )}
           </Navbar>
           <TopicActionsProvider openSidebarWithMessage={openSidebarWithMessage}>
+            <Suspense fallback={null}>
+              {hasVisitedMessages && (
+                <div hidden={!isMessagesRoute} aria-hidden={!isMessagesRoute}>
+                  <Messages enabled={isMessagesRoute || keepSortedScanAlive} />
+                </div>
+              )}
+            </Suspense>
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route index element={<Overview />} />
-                <Route
-                  path={clusterTopicMessagesRelativePath}
-                  element={<Messages />}
-                />
                 <Route
                   path={clusterTopicDownloadRelativePath}
                   element={<Download />}
@@ -393,7 +506,7 @@ const Topic: React.FC = () => {
                 {isConnectorsAvailable && (
                   <Route
                     path={clusterTopicConnectorsRelativePath}
-                    element={<Connectors connectors={connectors} />}
+                    element={<Connectors />}
                   />
                 )}
                 <Route path={clusterTopicEditRelativePath} element={<Edit />} />

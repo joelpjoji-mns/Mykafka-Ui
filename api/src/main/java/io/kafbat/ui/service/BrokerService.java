@@ -69,12 +69,12 @@ public class BrokerService {
     var partitionsDistribution = PartitionDistributionStats.create(stats);
     return adminClientService
         .get(cluster)
-        .flatMap(ReactiveAdminClient::describeCluster)
-        .map(description -> description.getNodes().stream()
-            .map(node -> new InternalBroker(node, partitionsDistribution, stats.getMetrics()))
-            .collect(Collectors.toList()))
-        .flatMapMany(Flux::fromIterable)
-        .doOnError(e -> adminClientService.invalidate(cluster, e));
+        .flatMapMany(ac -> ac.describeCluster()
+            .map(description -> description.getNodes().stream()
+                .map(node -> new InternalBroker(node, partitionsDistribution, stats.getMetrics()))
+                .collect(Collectors.toList()))
+            .flatMapMany(Flux::fromIterable)
+            .doOnError(e -> adminClientService.invalidate(cluster, ac, e)));
   }
 
   public Mono<Void> updateBrokerLogDir(KafkaCluster cluster,

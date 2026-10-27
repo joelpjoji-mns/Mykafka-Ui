@@ -46,10 +46,13 @@ describe('TopicTable Components', () => {
   const renderComponent = (
     currentData: TopicsResponse | undefined = undefined,
     isReadOnly = false,
-    isTopicDeletionAllowed = true
+    isTopicDeletionAllowed = true,
+    isRefetching = false
   ) => {
     (useTopics as jest.Mock).mockImplementation(() => ({
       data: currentData,
+      isLoading: false,
+      isRefetching,
     }));
 
     return render(
@@ -105,6 +108,19 @@ describe('TopicTable Components', () => {
       ).toBeInTheDocument();
 
       expect(screen.getAllByRole('checkbox').length).toEqual(3);
+    });
+    it('keeps cached topic rows visible during a background refresh', () => {
+      renderComponent(
+        { topics: topicsPayload, pageCount: 1 },
+        false,
+        true,
+        true
+      );
+
+      expect(
+        screen.getByRole('link', { name: 'external.topic' })
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     });
     describe('Selectable rows', () => {
       it('renders selectable rows', () => {

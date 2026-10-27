@@ -83,13 +83,43 @@ class MessagesServiceTest extends AbstractIntegrationTest {
     messagesService.sendMessage(cluster, topic, new CreateTopicMessageDTO()
         .partition(1).key("key").value("z".repeat(2_000))
         .keySerde(StringSerde.NAME).valueSerde(StringSerde.NAME)).block();
-    var sorted = messagesService.loadSortedTopicMessages(cluster, topic, List.of(), null, 1,
+    var sortedEvents = messagesService.loadSortedTopicMessages(cluster, topic, List.of(), null, 1,
         StringSerde.NAME, StringSerde.NAME, false, false, "size", "DESC")
+        .collectList().block(Duration.ofSeconds(30));
+    assertThat(sortedEvents).anyMatch(event ->
+        event.getType() == TopicMessageEventDTO.TypeEnum.PHASE
+            && "Provisional sort results".equals(event.getPhase().getName()));
+    int finalResultsIndex = -1;
+    for (int index = 0; index < sortedEvents.size(); index++) {
+      var event = sortedEvents.get(index);
+      if (event.getType() == TopicMessageEventDTO.TypeEnum.PHASE
+          && "Final sort results".equals(event.getPhase().getName())) {
+        finalResultsIndex = index;
+      }
+    }
+    assertThat(finalResultsIndex).isPositive();
+    var sorted = sortedEvents.subList(finalResultsIndex + 1, sortedEvents.size()).stream()
         .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
-        .map(TopicMessageEventDTO::getMessage).collectList().block(Duration.ofSeconds(30));
+        .map(TopicMessageEventDTO::getMessage).toList();
     assertThat(sorted).hasSize(1);
     assertThat(sorted.getFirst().getPartition()).isEqualTo(1);
     assertThat(sorted.getFirst().getValue()).isEqualTo("z".repeat(2_000));
+    var nextPageCursor = sortedEvents.stream()
+        .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.DONE)
+        .map(TopicMessageEventDTO::getCursor)
+        .filter(java.util.Objects::nonNull)
+        .map(cursor -> cursor.getId())
+        .findFirst()
+        .orElseThrow();
+    var nextPage = messagesService.loadSortedTopicMessagePage(
+            cluster, topic, nextPageCursor, 1, List.of(), null,
+            StringSerde.NAME, StringSerde.NAME, false, false, "size", "DESC")
+        .filter(event -> event.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
+        .map(TopicMessageEventDTO::getMessage)
+        .collectList()
+        .block(Duration.ofSeconds(30));
+    assertThat(nextPage).hasSize(1);
+    assertThat(nextPage.getFirst().getValue()).startsWith("middle-");
     messagesService.sendMessage(cluster, topic, new CreateTopicMessageDTO()
         .partition(0).key("key").value("a")
         .keySerde(StringSerde.NAME).valueSerde(StringSerde.NAME)).block();

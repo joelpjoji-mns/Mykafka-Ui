@@ -97,9 +97,9 @@ const ACList: React.FC = () => {
         />
       </ControlPanelWrapper>
 
-      {(acls.isLoading || acls.isRefetching) && <PageLoader offsetY={300} />}
+      {acls.isLoading && !acls.data && <PageLoader offsetY={300} />}
 
-      {acls.error && (
+      {acls.error && !acls.data && (
         <ErrorPage
           offsetY={300}
           status={acls.error.status}
@@ -108,7 +108,7 @@ const ACList: React.FC = () => {
         />
       )}
 
-      {acls.isSuccess && (
+      {acls.data !== undefined && (
         <AclsTable acls={acls.data ?? EMPTY_ACLS} columns={columns} />
       )}
 

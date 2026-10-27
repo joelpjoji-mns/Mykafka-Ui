@@ -166,10 +166,10 @@ const List = () => {
         <RefreshRateSelect storageKey="consumer-groups-refresh-rate" />
         <LagThresholdControl />
       </ControlPanelWrapper>
-      {(consumerGroups.isLoading || consumerGroups.isRefetching) && (
+      {consumerGroups.isLoading && !consumerGroups.data && (
         <PageLoader offsetY={300} />
       )}
-      {consumerGroups.error && (
+      {consumerGroups.error && !consumerGroups.data && (
         <ErrorPage
           offsetY={300}
           status={consumerGroups.error.status}
@@ -177,7 +177,7 @@ const List = () => {
           text={consumerGroups.error.message}
         />
       )}
-      {consumerGroups.isSuccess && (
+      {consumerGroups.data !== undefined && (
         <Table
           columns={columns}
           pageCount={consumerGroups.data?.pageCount || 0}

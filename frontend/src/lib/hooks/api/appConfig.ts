@@ -4,6 +4,7 @@ import {
 } from 'lib/api';
 import {
   useMutation,
+  useQuery,
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query';
@@ -32,7 +33,7 @@ export function useAuthenticate() {
 }
 
 export function useAppInfo() {
-  return useSuspenseQuery({
+  return useQuery({
     queryKey: ['app', 'info'],
     queryFn: async () => {
       const data = await appConfig.getApplicationInfoRaw();

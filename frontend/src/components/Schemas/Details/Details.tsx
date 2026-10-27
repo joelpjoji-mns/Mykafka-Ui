@@ -145,12 +145,11 @@ const Details: React.FC = () => {
         )}
       </ResourcePageHeading>
 
-      {(schema.isLoading ||
-        schema.isRefetching ||
-        versions.isLoading ||
-        versions.isRefetching) && <PageLoader />}
+      {((schema.isLoading && !schema.data) ||
+        (versions.isLoading && !versions.data)) && <PageLoader />}
 
-      {(schema.error || versions.error) && (
+      {((schema.error && !schema.data) ||
+        (versions.error && !versions.data)) && (
         <ErrorPage
           status={schema.error?.status || versions.error?.status}
           onClick={() => {
@@ -161,7 +160,7 @@ const Details: React.FC = () => {
         />
       )}
 
-      {schema.isSuccess && versions.isSuccess && (
+      {schema.data !== undefined && versions.data !== undefined && (
         <>
           {schema.data && <LatestVersionItem schema={schema.data} />}
           {impactVisible && Number.isInteger(selectedImpactVersion) && (

@@ -4288,6 +4288,7 @@ components:
       required:
         - name
         - status
+        - connectionStatus
       properties:
         name:
           type: string
@@ -4295,6 +4296,10 @@ components:
           type: boolean
         status:
           $ref: '#/components/schemas/ServerStatus'
+        connectionStatus:
+          allOf:
+            - $ref: '#/components/schemas/ServerStatus'
+          description: Cluster connectivity; statistics may still be initializing while this is ONLINE.
         lastError:
           $ref: '#/components/schemas/MetricsCollectionError'
         brokerCount:

@@ -19,7 +19,7 @@ const TopicTable: React.FC<{ params: GetTopicsRequest }> = ({ params }) => {
   const [searchParams] = useSearchParams();
   const { isReadOnly } = React.useContext(ClusterContext);
 
-  const { data, error, refetch, isLoading, isRefetching } = useTopics({
+  const { data, error, refetch, isLoading } = useTopics({
     ...params,
     page: Number(searchParams.get('page') || 1),
     perPage: Number(searchParams.get('perPage') || PER_PAGE),
@@ -100,11 +100,11 @@ const TopicTable: React.FC<{ params: GetTopicsRequest }> = ({ params }) => {
 
   const columnSizingPersister = useLocalStoragePersister('Topics');
 
-  if (isLoading || isRefetching) {
+  if (isLoading && !data) {
     return <PageLoader />;
   }
 
-  if (error) {
+  if (error && !data) {
     return <ErrorPage offsetY={201} status={error.status} onClick={refetch} />;
   }
 

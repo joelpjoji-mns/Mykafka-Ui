@@ -169,8 +169,8 @@ public class TopicsService {
         .flatMap(ac -> ac.describeTopic(topicName)
             .switchIfEmpty(Mono.error(new TopicNotFoundException()))
             .then(ac.getTopicsConfig(List.of(topicName), true))
-            .map(m -> m.values().stream().findFirst().orElse(List.of())))
-            .doOnError(e -> adminClientService.invalidate(cluster, e));
+            .map(m -> m.values().stream().findFirst().orElse(List.of()))
+            .doOnError(e -> adminClientService.invalidate(cluster, ac, e)));
   }
 
   private Mono<InternalTopic> createTopic(KafkaCluster c, ReactiveAdminClient adminClient, TopicCreationDTO topicData) {
@@ -179,7 +179,7 @@ public class TopicsService {
             topicData.getPartitions(),
             topicData.getReplicationFactor(),
             topicData.getConfigs())
-        .doOnError(e -> adminClientService.invalidate(c, e))
+        .doOnError(e -> adminClientService.invalidate(c, adminClient, e))
         .thenReturn(topicData)
         .onErrorMap(t -> new TopicMetadataException(t.getMessage(), t))
         .then(loadTopicAfterCreation(c, topicData.getName()));
@@ -489,12 +489,13 @@ public class TopicsService {
 
   private Mono<List<InternalTopic>> filterExisting(KafkaCluster cluster, Collection<InternalTopic> topics) {
     return adminClientService.get(cluster)
-        .flatMap(ac -> ac.listTopics(true))
-        .map(existing -> topics
-            .stream()
-            .filter(s -> existing.contains(s.getName()))
-            .collect(toList())
-        ).doOnError(e -> adminClientService.invalidate(cluster, e));
+        .flatMap(ac -> ac.listTopics(true)
+            .map(existing -> topics
+                .stream()
+                .filter(s -> existing.contains(s.getName()))
+                .collect(toList())
+            )
+            .doOnError(e -> adminClientService.invalidate(cluster, ac, e)));
   }
 
 }

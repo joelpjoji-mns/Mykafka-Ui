@@ -119,11 +119,9 @@ const List: React.FC = () => {
         />
       </ControlPanelWrapper>
 
-      {(schemas.isLoading || schemas.isRefetching) && (
-        <PageLoader offsetY={300} />
-      )}
+      {schemas.isLoading && !schemas.data && <PageLoader offsetY={300} />}
 
-      {schemas.error && (
+      {schemas.error && !schemas.data && (
         <ErrorPage
           offsetY={300}
           status={schemas.error.status}
@@ -132,7 +130,7 @@ const List: React.FC = () => {
         />
       )}
 
-      {schemas.isSuccess && (
+      {schemas.data !== undefined && (
         <Table
           columns={columns}
           data={schemas.data?.schemas || []}

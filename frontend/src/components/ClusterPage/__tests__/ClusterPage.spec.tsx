@@ -1,5 +1,5 @@
 import React from 'react';
-import { Cluster, ClusterFeaturesEnum } from 'generated-sources';
+import { Cluster, ClusterFeaturesEnum, ServerStatus } from 'generated-sources';
 import ClusterPageComponent from 'components/ClusterPage/ClusterPage';
 import { screen, waitFor } from '@testing-library/react';
 import { render, WithRoute } from 'lib/testHelpers';
@@ -51,8 +51,12 @@ jest.mock('lib/hooks/api/clusters', () => ({
 describe('ClusterPage', () => {
   const renderComponent = async (pathname: string, payload: Cluster[] = []) => {
     (useClusters as jest.Mock).mockImplementation(() => ({
-      data: payload,
+      data:
+        payload.length > 0
+          ? payload
+          : [{ ...onlineClusterPayload, name: 'second' }],
       isFetched: true,
+      isFetchedAfterMount: true,
     }));
     await render(
       <WithRoute path={`${clusterPath()}/*`}>
@@ -78,6 +82,84 @@ describe('ClusterPage', () => {
     expect(
       screen.getByText(CLusterCompText.ConsumerGroups)
     ).toBeInTheDocument();
+  });
+
+  it('keeps cached cluster pages visible when the status refresh fails', async () => {
+    (useClusters as jest.Mock).mockReturnValue({
+      data: [{ ...onlineClusterPayload, name: 'second' }],
+      isFetched: true,
+      isFetchedAfterMount: true,
+      isFetching: false,
+      error: new Error('temporary status refresh failure'),
+    });
+    await render(
+      <WithRoute path={`${clusterPath()}/*`}>
+        <ClusterPageComponent />
+      </WithRoute>,
+      { initialEntries: [clusterBrokersPath('second')] }
+    );
+
+    expect(screen.getByText(CLusterCompText.Brokers)).toBeInTheDocument();
+    expect(
+      screen.queryByText('Connecting to Kafka cluster second...')
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('waits for an initializing cluster before rendering cluster pages', async () => {
+    (useClusters as jest.Mock).mockReturnValue({
+      data: [
+        {
+          ...onlineClusterPayload,
+          name: 'second',
+          status: ServerStatus.INITIALIZING,
+          connectionStatus: ServerStatus.INITIALIZING,
+        },
+      ],
+      isFetched: true,
+      isFetchedAfterMount: true,
+    });
+    await render(
+      <WithRoute path={`${clusterPath()}/*`}>
+        <ClusterPageComponent />
+      </WithRoute>,
+      { initialEntries: [clusterBrokersPath('second')] }
+    );
+
+    expect(
+      screen.getByText('Connecting to Kafka cluster second...')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(CLusterCompText.Brokers)).not.toBeInTheDocument();
+  });
+
+  it('shows a retry state when the cluster is offline', async () => {
+    (useClusters as jest.Mock).mockReturnValue({
+      data: [
+        {
+          ...onlineClusterPayload,
+          name: 'second',
+          status: ServerStatus.OFFLINE,
+          connectionStatus: ServerStatus.OFFLINE,
+        },
+      ],
+      isFetched: true,
+      isFetchedAfterMount: true,
+      refetch: jest.fn(),
+    });
+    await render(
+      <WithRoute path={`${clusterPath()}/*`}>
+        <ClusterPageComponent />
+      </WithRoute>,
+      { initialEntries: [clusterBrokersPath('second')] }
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Kafka cluster is not connected'
+    );
+    expect(
+      screen.getByRole('button', { name: 'Check connection' })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(CLusterCompText.Brokers)).not.toBeInTheDocument();
   });
 
   describe('configured features', () => {

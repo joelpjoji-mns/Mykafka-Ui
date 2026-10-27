@@ -11,14 +11,14 @@ import List from './ui/List/List';
 const KafkaConnectClustersPage = () => {
   const { clusterName } = useAppParams<ClusterNameRoute>();
   const connects = useConnects(clusterName, true);
-
-  const isLoading = connects.isLoading || connects.isRefetching;
+  const hasData = connects.data !== undefined;
+  const isInitialLoading = connects.isLoading && !hasData;
 
   return (
     <>
-      {isLoading && <PageLoader offsetY={300} />}
+      {isInitialLoading && <PageLoader offsetY={300} />}
 
-      {connects.error && (
+      {connects.error && !hasData && (
         <ErrorPage
           offsetY={300}
           status={connects.error.status}
@@ -27,11 +27,11 @@ const KafkaConnectClustersPage = () => {
         />
       )}
 
-      {connects.isSuccess && !isLoading && (
+      {hasData && (
         <>
           <ClustersStatistics
             connects={connects.data ?? []}
-            isLoading={connects.isLoading}
+            isLoading={isInitialLoading}
           />
           <List connects={connects.data ?? []} />
         </>

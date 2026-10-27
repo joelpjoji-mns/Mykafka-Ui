@@ -26,7 +26,7 @@ describe('ClusterMenu', () => {
   const setupComponent = (cluster: Cluster, opened?: boolean) => (
     <ClusterMenu
       name={cluster.name}
-      status={cluster.status}
+      status={cluster.connectionStatus ?? cluster.status}
       features={cluster.features}
       opened={opened}
     />

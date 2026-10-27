@@ -23,7 +23,7 @@ export const Toolbar = styled.div`
   grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
   gap: 8px;
   width: 100%;
-  margin: 10px 0 0;
+  margin: 8px 0 0;
 
   @media screen and (max-width: ${({ theme }) => theme.breakpoints.M}px) {
     grid-template-columns: minmax(0, 1fr);

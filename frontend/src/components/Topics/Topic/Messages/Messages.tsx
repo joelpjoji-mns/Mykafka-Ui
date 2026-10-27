@@ -61,6 +61,7 @@ const MessageResults: React.FC<{
     messages,
     isFetching,
     consumptionStats,
+    isProvisionalRanking,
     phase,
     isLiveStreamReady,
     abortFetchData,
@@ -96,6 +97,7 @@ const MessageResults: React.FC<{
       <MessagesTable
         messages={messages}
         isFetching={pending || isFetching}
+        isProvisionalRanking={isProvisionalRanking}
         animateLiveArrivals={isLiveStreamReady}
         abortFetchData={abortFetchData}
         consumptionStats={consumptionStats}
@@ -143,14 +145,15 @@ const SearchPage: React.FC = () => {
   );
 };
 
-const Messages: React.FC<{ searchPage?: boolean }> = ({
+const Messages: React.FC<{ searchPage?: boolean; enabled?: boolean }> = ({
   searchPage = false,
+  enabled = true,
 }) => {
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
   return searchPage ? (
     <SearchPage key={`${clusterName}/${topicName}`} />
   ) : (
-    <MessageResults />
+    <MessageResults enabled={enabled} />
   );
 };
 

@@ -20,7 +20,7 @@ import { Toaster } from 'react-hot-toast';
 import GlobalCSS from 'components/globalCss';
 import * as S from 'components/App.styled';
 import { ThemeModeContext } from 'components/contexts/ThemeModeContext';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { scheduleIdleTask } from 'lib/utils/scheduleIdleTask';
 
 import ConfirmationModal from './common/ConfirmationModal/ConfirmationModal';
 import { ConfirmContextProvider } from './contexts/ConfirmContext';
@@ -28,13 +28,21 @@ import { GlobalSettingsProvider } from './contexts/GlobalSettingsContext';
 import { UserInfoRolesAccessProvider } from './contexts/UserInfoRolesAccessContext';
 import PageContainer from './PageContainer/PageContainer';
 
-const AuthPage = React.lazy(() => import('components/AuthPage/AuthPage'));
-const Dashboard = React.lazy(() => import('components/Dashboard/Dashboard'));
-const ClusterPage = React.lazy(
-  () => import('components/ClusterPage/ClusterPage')
-);
+const loadAuthPage = () => import('components/AuthPage/AuthPage');
+const loadDashboard = () => import('components/Dashboard/Dashboard');
+const loadClusterPage = () => import('components/ClusterPage/ClusterPage');
+const AuthPage = React.lazy(loadAuthPage);
+const Dashboard = React.lazy(loadDashboard);
+const ClusterPage = React.lazy(loadClusterPage);
 const ClusterConfigForm = React.lazy(() => import('widgets/ClusterConfigForm'));
 const ErrorPage = React.lazy(() => import('components/ErrorPage/ErrorPage'));
+const ReactQueryDevtools = React.lazy(() =>
+  import('@tanstack/react-query-devtools').then(
+    ({ ReactQueryDevtools: Devtools }) => ({
+      default: Devtools,
+    })
+  )
+);
 
 const queryCache = new QueryCache({
   onError: (error) => {
@@ -54,6 +62,11 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       networkMode: 'offlineFirst',
+      staleTime: 30_000,
+      gcTime: 30 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+      retryDelay: 500,
     },
     mutations: {
       onError(error) {
@@ -65,6 +78,14 @@ const queryClient = new QueryClient({
 const App: React.FC = () => {
   const { activeTheme } = useContext(ThemeModeContext);
   const isAuthRoute = useMatch('/login');
+
+  React.useEffect(() => {
+    if (isAuthRoute) return undefined;
+
+    return scheduleIdleTask(() => {
+      Promise.all([loadDashboard(), loadClusterPage()]).catch(showServerError);
+    });
+  }, [isAuthRoute]);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -117,7 +138,14 @@ const App: React.FC = () => {
           </GlobalSettingsProvider>
         )}
       </ThemeProvider>
-      <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-right" />
+      {process.env.NODE_ENV !== 'production' && (
+        <Suspense fallback={null}>
+          <ReactQueryDevtools
+            initialIsOpen={false}
+            buttonPosition="bottom-right"
+          />
+        </Suspense>
+      )}
     </QueryClientProvider>
   );
 };

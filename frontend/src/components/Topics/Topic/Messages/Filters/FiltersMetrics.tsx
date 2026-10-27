@@ -28,8 +28,8 @@ const FiltersMetrics: FC<FiltersMetricsProps> = ({
     <FlexBox
       justifyContent="flex-end"
       alignItems="center"
-      gap="22px"
-      padding="16px 0"
+      gap="12px"
+      padding="8px 0 4px"
     >
       <S.Message>{!isLiveMode(mode) && isFetching && phaseMessage}</S.Message>
       <S.MessageLoading isLive={isLiveMode(mode) && isFetching}>
@@ -37,7 +37,6 @@ const FiltersMetrics: FC<FiltersMetricsProps> = ({
         Loading messages...
         <S.StopLoading onClick={abortFetchData}>Stop loading</S.StopLoading>
       </S.MessageLoading>
-      <S.Message />
       <S.Metric title="Elapsed Time">
         <S.MetricsIcon>
           <ClockIcon />

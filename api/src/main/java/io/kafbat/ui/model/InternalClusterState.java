@@ -15,6 +15,7 @@ import org.jetbrains.annotations.Nullable;
 public class InternalClusterState {
   private String name;
   private ServerStatusDTO status;
+  private ServerStatusDTO connectionStatus;
   private MetricsCollectionErrorDTO lastError;
   private Integer topicCount;
   private Integer brokerCount;
@@ -35,6 +36,8 @@ public class InternalClusterState {
   public InternalClusterState(KafkaCluster cluster, Statistics statistics) {
     name = cluster.getName();
     status = statistics.getStatus();
+    connectionStatus = Optional.ofNullable(statistics.getConnectionStatus())
+        .orElse(statistics.getStatus());
     lastError = Optional.ofNullable(statistics.getLastKafkaException())
         .map(e -> new MetricsCollectionErrorDTO()
             .message(e.getMessage())

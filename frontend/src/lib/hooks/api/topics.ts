@@ -71,14 +71,28 @@ export const topicKeys = {
     [...topicKeys.details(props), 'acls'] as const,
 };
 
-export function useTopics(props: GetTopicsRequest) {
+export const topicsQueryOptions = (props: GetTopicsRequest) => {
   const { clusterName, ...filters } = props;
-  return useQuery<TopicsResponse, ServerResponse>({
+  return {
     queryKey: topicKeys.list(clusterName, filters),
     queryFn: () => apiFetch(() => api.getTopics(props)),
+    staleTime: 60_000,
+  };
+};
+
+export function useTopics(props: GetTopicsRequest) {
+  return useQuery<TopicsResponse, ServerResponse>({
+    ...topicsQueryOptions(props),
     placeholderData: (previousData) => previousData,
   });
 }
+
+export const topicDetailsQueryOptions = (props: GetTopicDetailsRequest) => ({
+  queryKey: topicKeys.details(props),
+  queryFn: () => apiFetch(() => api.getTopicDetails(props)),
+  staleTime: 60_000,
+});
+
 export function useTopicDetails(
   props: GetTopicDetailsRequest,
   queryOptions?: Omit<
@@ -87,8 +101,7 @@ export function useTopicDetails(
   >
 ) {
   return useQuery<TopicDetails, ServerResponse>({
-    queryKey: topicKeys.details(props),
-    queryFn: () => apiFetch(() => api.getTopicDetails(props)),
+    ...topicDetailsQueryOptions(props),
     ...queryOptions,
   });
 }

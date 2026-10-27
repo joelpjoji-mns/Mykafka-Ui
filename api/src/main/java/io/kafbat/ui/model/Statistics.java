@@ -16,6 +16,7 @@ import org.apache.kafka.clients.admin.TopicDescription;
 @Builder(toBuilder = true)
 public class Statistics implements AutoCloseable {
   ServerStatusDTO status;
+  ServerStatusDTO connectionStatus;
   Throwable lastKafkaException;
   String version;
   List<ClusterFeature> features;
@@ -29,6 +30,7 @@ public class Statistics implements AutoCloseable {
   public static Statistics empty() {
     return builder()
         .status(ServerStatusDTO.OFFLINE)
+        .connectionStatus(ServerStatusDTO.OFFLINE)
         .version("Unknown")
         .features(List.of())
         .clusterDescription(ReactiveAdminClient.ClusterDescription.empty())
@@ -39,11 +41,35 @@ public class Statistics implements AutoCloseable {
   }
 
   public static Statistics statsUpdateError(Throwable th) {
-    return empty().toBuilder().status(ServerStatusDTO.OFFLINE).lastKafkaException(th).build();
+    return statsUpdateError(th, empty(), false);
+  }
+
+  public static Statistics statsUpdateError(
+      Throwable th, Statistics previous, boolean connectionConfirmed) {
+    return previous.toBuilder()
+        .status(ServerStatusDTO.OFFLINE)
+        .connectionStatus(connectionConfirmed ? ServerStatusDTO.ONLINE : ServerStatusDTO.OFFLINE)
+        .lastKafkaException(th)
+        .build();
   }
 
   public static Statistics initializing() {
-    return empty().toBuilder().status(ServerStatusDTO.INITIALIZING).build();
+    return empty().toBuilder()
+        .status(ServerStatusDTO.INITIALIZING)
+        .connectionStatus(ServerStatusDTO.INITIALIZING)
+        .build();
+  }
+
+  public static Statistics connected(String version,
+                                     List<ClusterFeature> features,
+                                     ReactiveAdminClient.ClusterDescription clusterDescription) {
+    return empty().toBuilder()
+        .status(ServerStatusDTO.INITIALIZING)
+        .connectionStatus(ServerStatusDTO.ONLINE)
+        .version(version)
+        .features(features)
+        .clusterDescription(clusterDescription)
+        .build();
   }
 
   public Stream<TopicDescription> topicDescriptions() {

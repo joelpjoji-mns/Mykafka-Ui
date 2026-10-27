@@ -36,13 +36,14 @@ const KsqlDb: React.FC = () => {
   const tables = useKsqlTables(clusterName);
   const streams = useKsqlStreams(clusterName);
 
-  const isSuccess = tables.isSuccess && streams.isSuccess;
+  const isSuccess = tables.data !== undefined && streams.data !== undefined;
   const isLoading =
-    tables.isLoading ||
-    tables.isRefetching ||
-    streams.isLoading ||
-    streams.isRefetching;
-  const error = tables.error || streams.error;
+    (tables.isLoading && tables.data === undefined) ||
+    (streams.isLoading && streams.data === undefined);
+  const isFetching = tables.isFetching || streams.isFetching;
+  const error =
+    (tables.error && tables.data === undefined ? tables.error : undefined) ||
+    (streams.error && streams.data === undefined ? streams.error : undefined);
 
   return (
     <>
@@ -69,14 +70,14 @@ const KsqlDb: React.FC = () => {
             <Metrics.Indicator
               label="Tables"
               title="Tables"
-              fetching={isLoading}
+              fetching={isFetching}
             >
               {tables.data?.length || 0}
             </Metrics.Indicator>
             <Metrics.Indicator
               label="Streams"
               title="Streams"
-              fetching={isLoading}
+              fetching={isFetching}
             >
               {streams.data?.length || 0}
             </Metrics.Indicator>

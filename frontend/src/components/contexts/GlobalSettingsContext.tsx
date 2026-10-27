@@ -5,11 +5,13 @@ import { useNavigate } from 'react-router-dom';
 
 interface GlobalSettingsContextProps {
   hasDynamicConfig: boolean;
+  isLoading: boolean;
 }
 
 export const GlobalSettingsContext =
   React.createContext<GlobalSettingsContextProps>({
     hasDynamicConfig: false,
+    isLoading: true,
   });
 
 export const GlobalSettingsProvider: React.FC<
@@ -17,9 +19,7 @@ export const GlobalSettingsProvider: React.FC<
 > = ({ children }) => {
   const info = useAppInfo();
   const navigate = useNavigate();
-  const [value, setValue] = React.useState<GlobalSettingsContextProps>({
-    hasDynamicConfig: false,
-  });
+  const [hasDynamicConfig, setHasDynamicConfig] = React.useState(false);
 
   React.useEffect(() => {
     if (info.data?.redirect && !info.isFetching) {
@@ -30,16 +30,16 @@ export const GlobalSettingsProvider: React.FC<
     const features = info?.data?.response?.enabledFeatures;
 
     if (features) {
-      setValue({
-        hasDynamicConfig: features.includes(
-          ApplicationInfoEnabledFeaturesEnum.DYNAMIC_CONFIG
-        ),
-      });
+      setHasDynamicConfig(
+        features.includes(ApplicationInfoEnabledFeaturesEnum.DYNAMIC_CONFIG)
+      );
     }
   }, [info.data]);
 
   return (
-    <GlobalSettingsContext.Provider value={value}>
+    <GlobalSettingsContext.Provider
+      value={{ hasDynamicConfig, isLoading: info.isLoading }}
+    >
       {children}
     </GlobalSettingsContext.Provider>
   );

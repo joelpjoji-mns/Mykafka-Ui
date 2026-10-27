@@ -1,4 +1,3 @@
-import PageLoader from 'components/common/PageLoader/PageLoader';
 import TableHeaderCell from 'components/common/table/TableHeaderCell/TableHeaderCell';
 import {
   PollingMode,
@@ -8,14 +7,12 @@ import {
 } from 'generated-sources';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from 'components/common/Button/Button';
-import * as S from 'components/common/NewTable/Table.styled';
 import { usePaginateTopics, useIsLiveMode } from 'lib/hooks/useMessagesFilters';
 import { useMessageFiltersStore } from 'lib/hooks/useMessageFiltersStore';
 import useAppParams from 'lib/hooks/useAppParams';
 import { RouteParamsClusterTopic } from 'lib/paths';
 import { useLocalStorage } from 'lib/hooks/useLocalStorage';
 import { useSearchParams } from 'react-router-dom';
-import FlexBox from 'components/common/FlexBox/FlexBox';
 import { MessagesFilterKeys } from 'lib/constants';
 
 import Message, { PreviewFilter } from './Message';
@@ -25,6 +22,7 @@ import * as TableS from './MessagesTable.styled';
 export interface MessagesTableProps {
   messages: TopicMessage[];
   isFetching: boolean;
+  isProvisionalRanking?: boolean;
   animateLiveArrivals?: boolean;
   abortFetchData?: () => void;
   consumptionStats?: TopicMessageConsuming;
@@ -113,6 +111,7 @@ interface MessagePreviewProps {
 const MessagesTable: React.FC<MessagesTableProps> = ({
   messages,
   isFetching,
+  isProvisionalRanking = false,
   animateLiveArrivals = false,
   abortFetchData,
   consumptionStats,
@@ -122,6 +121,11 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
   const [cancelled, setCancelled] = useState(false);
   const scanning =
     wholeTopic && params.has('orderBy') && isFetching && !cancelled;
+  const sortedPageLoading =
+    wholeTopic &&
+    params.has(MessagesFilterKeys.cursor) &&
+    isFetching &&
+    !cancelled;
   useEffect(() => {
     if (isFetching) setCancelled(false);
   }, [isFetching]);
@@ -133,8 +137,33 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
     'Click a heading to rank all retained matching records across all partitions. Time/offset bounds are ignored; new arrivals require another scan.';
   if (cancelled) {
     scanStatus = 'Scan cancelled. No partial ranking is shown.';
+  } else if (sortedPageLoading) {
+    scanStatus = `Loading sorted page ${
+      Number(params.get(MessagesFilterKeys.cursor) || 0) + 1
+    }...`;
   } else if (scanning) {
-    scanStatus = `Scanning whole topic: ${consumptionStats?.messagesConsumed || 0} records read...`;
+    scanStatus = isProvisionalRanking
+      ? `Scanning whole topic: ${
+          consumptionStats?.messagesConsumed || 0
+        } records read. Showing ${messages.length} provisional sorted results.`
+      : `Scanning whole topic: ${
+          consumptionStats?.messagesConsumed || 0
+        } records read...`;
+  } else if (wholeTopic && !isFetching && messages.length > 0) {
+    scanStatus = `Whole-topic sort complete. Page ${
+      Number(params.get(MessagesFilterKeys.cursor) || 0) + 1
+    }: showing ${messages.length} matching records.`;
+  } else if (isProvisionalRanking) {
+    scanStatus =
+      'Scan ended before final ranking completed. Showing provisional results.';
+  }
+  let emptyMessagesText = 'Loading messages...';
+  if (wholeTopic) {
+    emptyMessagesText =
+      'Waiting for matching messages while the full-topic scan continues...';
+  }
+  if (sortedPageLoading) {
+    emptyMessagesText = 'Loading the next sorted page...';
   }
   const getSortProps = (columnId: ResizableMessageColumnId) => ({
     orderBy,
@@ -368,26 +397,36 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
 
   return (
     <div style={{ position: 'relative' }}>
-      <FlexBox
-        padding="12px 16px"
-        gap="12px"
-        alignItems="center"
-        flexWrap="wrap"
-      >
-        <span role="status">{scanStatus}</span>
-        {scanning && (
+      <TableS.ScanToolbar>
+        <TableS.ScanStatus role="status">{scanStatus}</TableS.ScanStatus>
+        <TableS.ScanActions>
+          {scanning && (
+            <Button
+              buttonType="secondary"
+              buttonSize="M"
+              onClick={() => {
+                abortFetchData?.();
+                setCancelled(true);
+              }}
+            >
+              Cancel topic scan
+            </Button>
+          )}
           <Button
+            disabled={isLive || isFetching || !nextCursor}
+            title={
+              wholeTopic && isFetching
+                ? 'Next page is available after the full-topic ranking completes.'
+                : undefined
+            }
             buttonType="secondary"
             buttonSize="M"
-            onClick={() => {
-              abortFetchData?.();
-              setCancelled(true);
-            }}
+            onClick={paginate}
           >
-            Cancel topic scan
+            Next →
           </Button>
-        )}
-      </FlexBox>
+        </TableS.ScanActions>
+      </TableS.ScanToolbar>
       {previewFor !== null && (
         <PreviewModal
           values={getPreviewFilters()}
@@ -487,7 +526,7 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
             {!cancelled && isFetching && !messages.length && (
               <tr>
                 <td colSpan={10}>
-                  <PageLoader />
+                  <span role="status">{emptyMessagesText}</span>
                 </td>
               </tr>
             )}
@@ -499,18 +538,6 @@ const MessagesTable: React.FC<MessagesTableProps> = ({
           </tbody>
         </TableS.ResizableTable>
       </TableS.TableViewport>
-      <S.Pagination>
-        <S.Pages>
-          <Button
-            disabled={wholeTopic || isLive || isFetching || !nextCursor}
-            buttonType="secondary"
-            buttonSize="L"
-            onClick={paginate}
-          >
-            Next →
-          </Button>
-        </S.Pages>
-      </S.Pagination>
     </div>
   );
 };

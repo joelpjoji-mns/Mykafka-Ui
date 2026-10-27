@@ -22,19 +22,17 @@ const ListPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { isFtsEnabled } = useFts('connects');
   const {
-    data: connectors = emptyConnectors,
+    data: connectorsData,
     isLoading,
-    isRefetching,
-    isSuccess,
     error,
     refetch,
   } = useConnectors(clusterName, searchParams.get('q') || '', isFtsEnabled);
-
-  const isLoadingConnectors = isLoading || isRefetching;
+  const connectors = connectorsData ?? emptyConnectors;
+  const isInitialLoading = isLoading && connectorsData === undefined;
 
   return (
     <FilteredConnectorsProvider>
-      <ConnectorsStatistics isLoading={isLoadingConnectors} />
+      <ConnectorsStatistics isLoading={isInitialLoading} />
       <S.Search hasInput>
         <Search
           key={clusterName}
@@ -43,9 +41,9 @@ const ListPage: React.FC = () => {
         />
       </S.Search>
 
-      {isLoadingConnectors && <PageLoader offsetY={370} />}
+      {isInitialLoading && <PageLoader offsetY={370} />}
 
-      {error && (
+      {error && connectorsData === undefined && (
         <ErrorPage
           offsetY={370}
           status={error.status}
@@ -54,7 +52,9 @@ const ListPage: React.FC = () => {
         />
       )}
 
-      {isSuccess && <ConnectorsTable connectors={connectors} />}
+      {connectorsData !== undefined && (
+        <ConnectorsTable connectors={connectors} />
+      )}
     </FilteredConnectorsProvider>
   );
 };

@@ -17,6 +17,7 @@ import useAppParams from 'lib/hooks/useAppParams';
 import { LOCAL_STORAGE_KEY_PREFIX } from 'lib/constants';
 import { TopicActionsProvider } from 'components/contexts/TopicActionsContext';
 import { useLocation } from 'react-router-dom';
+import { useMessageFiltersStore } from 'lib/hooks/useMessageFiltersStore';
 
 const QueryLocation = () => (
   <output data-testid="query-location">{useLocation().search}</output>
@@ -53,7 +54,10 @@ jest.mock('lib/hooks/useAppParams', () => ({
 }));
 
 describe('MessagesTable', () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    useMessageFiltersStore.getState().setNextCursor(undefined);
+  });
 
   const renderComponent = (
     props?: Partial<MessagesTableProps>,
@@ -108,7 +112,9 @@ describe('MessagesTable', () => {
     const abortFetchData = jest.fn();
     renderComponent(
       {
+        messages: [topicMessagePayload],
         isFetching: true,
+        isProvisionalRanking: true,
         abortFetchData,
         consumptionStats: {
           messagesConsumed: 1200,
@@ -119,8 +125,11 @@ describe('MessagesTable', () => {
       '/?orderBy=size&sortOrder=DESC'
     );
     expect(
-      screen.getByText('Scanning whole topic: 1200 records read...')
+      screen.getByText(
+        'Scanning whole topic: 1200 records read. Showing 1 provisional sorted results.'
+      )
     ).toBeInTheDocument();
+    expect(screen.getByText(topicMessagePayload.value!)).toBeInTheDocument();
     await userEvent.click(
       screen.getByRole('button', { name: 'Cancel topic scan' })
     );
@@ -128,6 +137,71 @@ describe('MessagesTable', () => {
     expect(
       screen.getByText('Scan cancelled. No partial ranking is shown.')
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText(topicMessagePayload.value!)
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps Next visible while the exact whole-topic ranking is being built', () => {
+    renderComponent(
+      {
+        messages: [topicMessagePayload],
+        isFetching: true,
+        isProvisionalRanking: true,
+      },
+      '/?orderBy=size&sortOrder=DESC'
+    );
+
+    const nextButton = screen.getByRole('button', { name: 'Next →' });
+    expect(nextButton).toBeVisible();
+    expect(nextButton).toBeDisabled();
+    expect(nextButton).toHaveAttribute(
+      'title',
+      'Next page is available after the full-topic ranking completes.'
+    );
+  });
+
+  it('shows an in-table message while a filtered full-topic scan has no matches yet', () => {
+    renderComponent(
+      {
+        isFetching: true,
+        consumptionStats: {
+          messagesConsumed: 12_000,
+          bytesConsumed: 100_000,
+          elapsedMs: 1_000,
+        },
+      },
+      '/?orderBy=size&stringFilter=rare-match'
+    );
+
+    expect(
+      screen.getByText(
+        'Waiting for matching messages while the full-topic scan continues...'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('confirms when the whole-topic sort has completed', () => {
+    renderComponent(
+      { messages: [topicMessagePayload], isFetching: false },
+      '/?orderBy=size&sortOrder=DESC'
+    );
+
+    expect(
+      screen.getByText(
+        'Whole-topic sort complete. Page 1: showing 1 matching records.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('enables Next when a sorted result page has a continuation cursor', () => {
+    useMessageFiltersStore.getState().setNextCursor('next-page-cursor');
+    renderComponent(
+      { messages: [topicMessagePayload], isFetching: false },
+      '/?orderBy=size&sortOrder=DESC'
+    );
+
+    expect(screen.getByRole('button', { name: 'Next →' })).toBeEnabled();
   });
 
   it.each([
@@ -319,9 +393,10 @@ describe('MessagesTable', () => {
       expect(screen.queryByText(/next/i)).toBeDisabled();
     });
 
-    it('should check the display of the loader element during loader', () => {
+    it('shows inline loading status without a blocking spinner', () => {
       renderComponent({ isFetching: true });
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+      expect(screen.getByText('Loading messages...')).toBeInTheDocument();
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     });
   });
 

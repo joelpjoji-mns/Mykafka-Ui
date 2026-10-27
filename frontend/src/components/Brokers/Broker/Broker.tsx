@@ -29,14 +29,7 @@ const Broker: React.FC = () => {
   const { clusterName, brokerId } = useAppParams<ClusterBrokerParam>();
 
   const { data: clusterStats } = useClusterStats(clusterName);
-  const {
-    data: brokers,
-    error,
-    isSuccess,
-    refetch,
-    isLoading,
-    isRefetching,
-  } = useBrokers(clusterName);
+  const { data: brokers, error, refetch, isLoading } = useBrokers(clusterName);
 
   const brokerItem = brokers?.find(({ id }) => id === Number(brokerId));
   const brokerDiskUsage = clusterStats?.diskUsage?.find(
@@ -51,9 +44,9 @@ const Broker: React.FC = () => {
         backText="Brokers"
       />
 
-      {(isLoading || isRefetching) && <PageLoader />}
+      {isLoading && !brokers && <PageLoader />}
 
-      {(error || brokerItem === undefined) && (
+      {isLoading === false && brokerItem === undefined && (
         <ErrorPage
           status={error?.status || 404}
           onClick={refetch}
@@ -61,7 +54,7 @@ const Broker: React.FC = () => {
         />
       )}
 
-      {isSuccess && brokerItem !== undefined && (
+      {brokerItem !== undefined && (
         <>
           <Metrics.Wrapper>
             <Metrics.Section>

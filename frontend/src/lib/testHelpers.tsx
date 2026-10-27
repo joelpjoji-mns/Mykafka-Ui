@@ -124,6 +124,7 @@ const customRender = (
       <GlobalSettingsContext.Provider
         value={{
           hasDynamicConfig: false,
+          isLoading: false,
           ...globalSettings,
         }}
       >

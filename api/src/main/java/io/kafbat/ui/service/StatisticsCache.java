@@ -29,6 +29,16 @@ public class StatisticsCache {
     cache.put(c.getName(), stats);
   }
 
+  public synchronized void markConnected(KafkaCluster c, Statistics connectedStats) {
+    Statistics current = get(c);
+    ServerStatusDTO connectionStatus = current.getConnectionStatus() == null
+        ? current.getStatus()
+        : current.getConnectionStatus();
+    if (connectionStatus != ServerStatusDTO.ONLINE) {
+      replace(c, connectedStats);
+    }
+  }
+
   public synchronized void update(KafkaCluster c,
                                   Map<String, TopicDescription> descriptions,
                                   Map<String, List<ConfigEntry>> configs,

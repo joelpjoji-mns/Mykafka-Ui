@@ -31,13 +31,15 @@ const DetailsPage: React.FC = () => {
   const connector = useConnector({ clusterName, connectName, connectorName });
   const tasks = useConnectorTasks({ clusterName, connectName, connectorName });
 
-  const isSuccess = connector.isSuccess && tasks.isSuccess;
+  const isSuccess = connector.data !== undefined && tasks.data !== undefined;
   const isLoading =
-    connector.isLoading ||
-    connector.isRefetching ||
-    tasks.isLoading ||
-    tasks.isRefetching;
-  const error = connector.error || tasks.error;
+    (connector.isLoading && connector.data === undefined) ||
+    (tasks.isLoading && tasks.data === undefined);
+  const error =
+    (connector.error && connector.data === undefined
+      ? connector.error
+      : undefined) ||
+    (tasks.error && tasks.data === undefined ? tasks.error : undefined);
 
   return (
     <div>

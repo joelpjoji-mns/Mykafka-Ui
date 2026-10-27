@@ -51,12 +51,25 @@ describe('List', () => {
   describe('fetch error', () => {
     it('shows progressbar', async () => {
       (useGetSchemas as jest.Mock).mockImplementation(() => ({
-        data: {},
+        data: undefined,
         isLoading: true,
         isSuccess: false,
       }));
       renderComponent();
       expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
+    it('keeps cached schemas visible during a background refresh', () => {
+      (useGetSchemas as jest.Mock).mockImplementation(() => ({
+        data: schemasPayload,
+        isLoading: false,
+        isRefetching: true,
+        isSuccess: true,
+      }));
+      renderComponent();
+
+      expect(screen.getByText(schemaVersion1.subject)).toBeInTheDocument();
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     });
   });
 

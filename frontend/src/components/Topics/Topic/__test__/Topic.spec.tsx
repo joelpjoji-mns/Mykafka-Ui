@@ -234,60 +234,92 @@ describe('Details', () => {
   });
 
   describe('Internal routing', () => {
-    const itExpectsCorrectPageRendered = (
+    const itExpectsCorrectPageRendered = async (
       path: string,
       tab: string,
       selector: string
     ) => {
       renderComponent(false, path);
       expect(screen.getByText(tab)).toHaveClass('is-active');
-      expect(screen.getByText(selector)).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.getByText(selector)).toBeInTheDocument()
+      );
     };
 
-    it('renders Overview tab by default', () => {
-      itExpectsCorrectPageRendered(defaultPath, 'Overview', 'OverviewMock');
+    it('renders Overview tab by default', async () => {
+      await itExpectsCorrectPageRendered(
+        defaultPath,
+        'Overview',
+        'OverviewMock'
+      );
     });
-    it('renders Messages tabs', () => {
-      itExpectsCorrectPageRendered(
+    it('keeps the topic page visible while details refresh in the background', async () => {
+      (useTopicDetails as jest.Mock).mockReturnValue({
+        data: topic,
+        isSuccess: false,
+        isLoading: false,
+        isRefetching: true,
+      });
+
+      renderComponent(false, defaultPath);
+
+      await waitFor(() =>
+        expect(screen.getByText('OverviewMock')).toBeInTheDocument()
+      );
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    });
+    it('renders Messages tabs', async () => {
+      await itExpectsCorrectPageRendered(
         clusterTopicMessagesPath(),
         'Messages',
         'MessagesMock'
       );
     });
-    it('renders Consumers tab', () => {
-      itExpectsCorrectPageRendered(
+    it('renders Consumers tab', async () => {
+      await itExpectsCorrectPageRendered(
         clusterTopicConsumerGroupsPath(),
         'Consumers',
         'ConsumerGroupsMock'
       );
     });
-    it('renders Settings tab', () => {
-      itExpectsCorrectPageRendered(
+    it('renders Settings tab', async () => {
+      await itExpectsCorrectPageRendered(
         clusterTopicSettingsPath(),
         'Settings',
         'SettingsMock'
       );
     });
-    it('renders Statistics tab', () => {
-      itExpectsCorrectPageRendered(
+    it('renders Statistics tab', async () => {
+      await itExpectsCorrectPageRendered(
         clusterTopicStatisticsPath(),
         'Statistics',
         'StatisticsMock'
       );
     });
-    it('renders Profile tab', () => {
-      itExpectsCorrectPageRendered(
+    it('renders Profile tab', async () => {
+      await itExpectsCorrectPageRendered(
         clusterTopicDataProfilePath(),
         'Profile',
         'DataProfileMock'
       );
     });
-    it('renders Developer tab', () => {
-      itExpectsCorrectPageRendered(
+    it('renders Developer tab', async () => {
+      await itExpectsCorrectPageRendered(
         clusterTopicDeveloperPath(),
         'Developer',
         'DeveloperHubMock'
       );
+    });
+
+    it('keeps Messages mounted while switching between topic tabs', async () => {
+      renderComponent(false, defaultPath);
+
+      await userEvent.click(screen.getByRole('link', { name: 'Messages' }));
+      expect(await screen.findByText('MessagesMock')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('link', { name: 'Settings' }));
+      expect(await screen.findByText('SettingsMock')).toBeInTheDocument();
+      expect(screen.getByText('MessagesMock')).toBeInTheDocument();
     });
   });
 });

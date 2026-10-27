@@ -156,6 +156,8 @@ interface DownloadMessagesZipProps {
   format?: string;
   searchMatch?: string;
   searchScope?: string;
+  partitionOffsets?: string;
+  partitionOffsetRanges?: string;
 }
 
 export interface DownloadSettings {
@@ -788,6 +790,8 @@ export function useDownloadMessagesZip() {
       format,
       searchMatch,
       searchScope,
+      partitionOffsets,
+      partitionOffsetRanges,
     }: DownloadMessagesZipProps) => {
       const requestParams = new URLSearchParams({
         limit: limit.toString(),
@@ -814,6 +818,8 @@ export function useDownloadMessagesZip() {
         ['format', format],
         ['searchMatch', searchMatch],
         ['searchScope', searchScope],
+        ['partitionOffsets', partitionOffsets],
+        ['partitionOffsetRanges', partitionOffsetRanges],
       ];
 
       optionalParams.forEach(([key, value]) => {

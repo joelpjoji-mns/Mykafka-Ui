@@ -39,7 +39,14 @@ type DownloadMode =
   | 'TO_OFFSET'
   | 'FROM_TIMESTAMP'
   | 'TO_TIMESTAMP'
-  | 'TIMEFRAME';
+  | 'TIMEFRAME'
+  | 'PARTITION_OFFSETS'
+  | 'PARTITION_OFFSET_RANGES';
+
+type PartitionOffsetRangeValues = {
+  start?: string;
+  end?: string;
+};
 
 const downloadModeOptions: Option<DownloadMode>[] = [
   { label: 'Newest / last N', value: 'LATEST' },
@@ -49,6 +56,8 @@ const downloadModeOptions: Option<DownloadMode>[] = [
   { label: 'From time', value: 'FROM_TIMESTAMP' },
   { label: 'To time', value: 'TO_TIMESTAMP' },
   { label: 'Time frame', value: 'TIMEFRAME' },
+  { label: 'Per-partition start offsets', value: 'PARTITION_OFFSETS' },
+  { label: 'Per-partition offset ranges', value: 'PARTITION_OFFSET_RANGES' },
 ];
 
 const formatOptions: Option<string>[] = [
@@ -123,6 +132,7 @@ const toPartitionOptions = (partitions: string | null): PartitionOption[] => {
 
 const isDownloadMode = (mode: string | null): mode is DownloadMode =>
   mode !== null && downloadModeOptions.some(({ value }) => value === mode);
+const digitsOnly = (value: string) => value.replace(/\D/g, '');
 
 const Download: React.FC = () => {
   const { clusterName, topicName } = useAppParams<RouteParamsClusterTopic>();
@@ -147,6 +157,10 @@ const Download: React.FC = () => {
   const [searchMatch, setSearchMatch] = useState('ALL');
   const [searchScope, setSearchScope] = useState('ALL');
   const [offset, setOffset] = useState('0');
+  const [partitionOffsets, setPartitionOffsets] = useState<Record<number, string>>({});
+  const [partitionOffsetRanges, setPartitionOffsetRanges] = useState<
+    Record<number, PartitionOffsetRangeValues>
+  >({});
   const [fromTime, setFromTime] = useState('');
   const [toTime, setToTime] = useState('');
   const [format, setFormat] = useState('VALUE_ONLY');
@@ -162,6 +176,10 @@ const Download: React.FC = () => {
     }));
   }, [topic?.partitions]);
 
+  const advancedPartitionOptions = useMemo<PartitionOption[]>(() => {
+    return partitionMode === 'SELECTED' ? selectedPartitions : partitionOptions;
+  }, [partitionMode, partitionOptions, selectedPartitions]);
+
   const preferredKeySerde = getPreferredDescription(serdes.key || [])?.name;
   const preferredValueSerde = getPreferredDescription(serdes.value || [])?.name;
 
@@ -172,6 +190,11 @@ const Download: React.FC = () => {
 
   const isOffsetMode =
     downloadMode === 'FROM_OFFSET' || downloadMode === 'TO_OFFSET';
+  const isPartitionOffsetsMode = downloadMode === 'PARTITION_OFFSETS';
+  const isPartitionOffsetRangesMode =
+    downloadMode === 'PARTITION_OFFSET_RANGES';
+  const isAdvancedOffsetMode =
+    isPartitionOffsetsMode || isPartitionOffsetRangesMode;
   const isFromTimeVisible =
     downloadMode === 'FROM_TIMESTAMP' || downloadMode === 'TIMEFRAME';
   const isToTimeVisible =
@@ -294,32 +317,85 @@ const Download: React.FC = () => {
     setDownloadMode(isDownloadMode(mode) ? mode : 'LATEST');
   };
 
+  const updatePartitionOffset = (partition: number, value: string) => {
+    setPartitionOffsets((current) => ({
+      ...current,
+      [partition]: digitsOnly(value),
+    }));
+  };
+
+  const updatePartitionOffsetRange = (
+    partition: number,
+    field: keyof PartitionOffsetRangeValues,
+    value: string
+  ) => {
+    setPartitionOffsetRanges((current) => ({
+      ...current,
+      [partition]: {
+        ...current[partition],
+        [field]: digitsOnly(value),
+      },
+    }));
+  };
+
+  const partitionOffsetsQuery = () => {
+    return advancedPartitionOptions
+      .map(({ value }) => `p${value}:${partitionOffsets[value] || '0'}`)
+      .join(',');
+  };
+
+  const partitionOffsetRangesQuery = () => {
+    return advancedPartitionOptions
+      .map(({ value }) => {
+        const range = partitionOffsetRanges[value] || {};
+        const start = range.start || '0';
+        const end = range.end || start;
+        return `p${value}:${start}-${end}`;
+      })
+      .join(',');
+  };
+
   const handleDownload = () => {
-    const resolvedMode =
-      downloadMode === 'TIMEFRAME' ? 'FROM_TIMESTAMP' : downloadMode;
+    let resolvedMode: string = downloadMode;
+    if (downloadMode === 'TIMEFRAME') {
+      resolvedMode = 'FROM_TIMESTAMP';
+    }
+    if (isAdvancedOffsetMode) {
+      resolvedMode = 'FROM_OFFSET';
+    }
     const timestamp =
-      downloadMode === 'TO_TIMESTAMP'
+      !isAdvancedOffsetMode && downloadMode === 'TO_TIMESTAMP'
         ? toEpochMillis(toTime)
         : toEpochMillis(fromTime);
     const timestampTo =
-      downloadMode === 'TIMEFRAME' ? toEpochMillis(toTime) : undefined;
+      !isAdvancedOffsetMode && downloadMode === 'TIMEFRAME'
+        ? toEpochMillis(toTime)
+        : undefined;
 
     downloadMessagesZip.mutate({
       clusterName,
       topicName,
       limit: resolvedLimit,
-      partitions: selectedPartitionValues,
+      partitions: isAdvancedOffsetMode ? undefined : selectedPartitionValues,
       stringFilters: searchFilters.length ? searchFilters : undefined,
       smartFilterId: smartFilterId || undefined,
       keySerde,
       valueSerde,
       downloadMode: resolvedMode,
-      offset: isOffsetMode ? offset : undefined,
-      timestamp,
+      offset: !isAdvancedOffsetMode && isOffsetMode ? offset : undefined,
+      timestamp: isAdvancedOffsetMode ? undefined : timestamp,
       timestampTo,
       format,
       searchMatch,
       searchScope,
+      partitionOffsets:
+        isPartitionOffsetsMode && advancedPartitionOptions.length
+          ? partitionOffsetsQuery()
+          : undefined,
+      partitionOffsetRanges:
+        isPartitionOffsetRangesMode && advancedPartitionOptions.length
+          ? partitionOffsetRangesQuery()
+          : undefined,
     });
   };
 
@@ -348,7 +424,10 @@ const Download: React.FC = () => {
             buttonType="primary"
             buttonSize="M"
             onClick={handleDownload}
-            disabled={downloadMessagesZip.isPending}
+            disabled={
+              downloadMessagesZip.isPending ||
+              (isAdvancedOffsetMode && !advancedPartitionOptions.length)
+            }
           >
             {downloadMessagesZip.isPending
               ? `Preparing ${downloadKind}...`
@@ -436,6 +515,76 @@ const Download: React.FC = () => {
                   }}
                 />
               </Field>
+            )}
+            {isAdvancedOffsetMode && (
+              <AdvancedOffsets>
+                <HelperText>
+                  {partitionMode === 'SELECTED'
+                    ? 'Advanced offsets use the selected partitions below.'
+                    : 'Advanced offsets use every partition in this topic.'}{' '}
+                  The max messages value is a total ZIP cap across all partitions.
+                </HelperText>
+                {advancedPartitionOptions.length ? (
+                  <OffsetRows>
+                    {advancedPartitionOptions.map(({ label, value }) => (
+                      <OffsetRow key={value} $range={isPartitionOffsetRangesMode}>
+                        <PartitionBadge>{label}</PartitionBadge>
+                        {isPartitionOffsetsMode && (
+                          <OffsetField>
+                            <Label>Start offset</Label>
+                            <Input
+                              inputSize="M"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={partitionOffsets[value] || '0'}
+                              onChange={({ target }: ChangeEvent<HTMLInputElement>) => {
+                                updatePartitionOffset(value, target.value);
+                              }}
+                            />
+                          </OffsetField>
+                        )}
+                        {isPartitionOffsetRangesMode && (
+                          <>
+                            <OffsetField>
+                              <Label>Start offset</Label>
+                              <Input
+                                inputSize="M"
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                value={partitionOffsetRanges[value]?.start || '0'}
+                                onChange={({ target }: ChangeEvent<HTMLInputElement>) => {
+                                  updatePartitionOffsetRange(value, 'start', target.value);
+                                }}
+                              />
+                            </OffsetField>
+                            <OffsetField>
+                              <Label>End offset (inclusive)</Label>
+                              <Input
+                                inputSize="M"
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                value={
+                                  partitionOffsetRanges[value]?.end ||
+                                  partitionOffsetRanges[value]?.start ||
+                                  '0'
+                                }
+                                onChange={({ target }: ChangeEvent<HTMLInputElement>) => {
+                                  updatePartitionOffsetRange(value, 'end', target.value);
+                                }}
+                              />
+                            </OffsetField>
+                          </>
+                        )}
+                      </OffsetRow>
+                    ))}
+                  </OffsetRows>
+                ) : (
+                  <HelperText>Select at least one partition to use this mode.</HelperText>
+                )}
+              </AdvancedOffsets>
             )}
             {isFromTimeVisible && (
               <Field>
@@ -753,6 +902,68 @@ const Label = styled.span`
   font-weight: 600;
   color: ${({ theme }) => theme.input.label.color};
   overflow-wrap: anywhere;
+`;
+
+const HelperText = styled.p`
+  margin: 0;
+  color: ${({ theme }) => theme.modal.contentColor};
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+`;
+
+const AdvancedOffsets = styled.div`
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+`;
+
+const OffsetRows = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 2px;
+`;
+
+const OffsetRow = styled.div<{ $range: boolean }>`
+  display: grid;
+  grid-template-columns: ${({ $range }) =>
+    $range
+      ? 'minmax(140px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr)'
+      : 'minmax(140px, 1fr) minmax(120px, 2fr)'};
+  gap: 12px;
+  align-items: end;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid ${({ theme }) => theme.modal.border.contrast};
+  border-radius: 10px;
+  background-color: ${({ theme }) => theme.modal.backgroundColor};
+
+  @media screen and (max-width: ${({ theme }) => theme.breakpoints.S}px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const PartitionBadge = styled.div`
+  min-width: 0;
+  color: ${({ theme }) => theme.default.color.normal};
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const OffsetField = styled.label`
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 `;
 
 export default Download;

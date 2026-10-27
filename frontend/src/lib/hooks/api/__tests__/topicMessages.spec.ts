@@ -937,6 +937,60 @@ describe('Topic Messages hooks', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:messages');
   });
 
+  it('downloads with per-partition starting offsets', async () => {
+    const path = `/api/clusters/${clusterName}/topics/${topicName}/messages/download?limit=5&downloadMode=FROM_OFFSET&format=JSON&partitionOffsets=p0%3A10%2Cp1%3A20`;
+    const mock = fetchMock.getOnce(path, {
+      body: 'zip-content',
+      headers: {
+        'content-type': 'application/zip',
+      },
+    });
+    const { result } = renderHook(() => hooks.useDownloadMessagesZip(), {
+      wrapper: TestQueryClientProvider,
+    });
+
+    await act(() =>
+      result.current.mutateAsync({
+        clusterName,
+        topicName,
+        limit: 5,
+        downloadMode: 'FROM_OFFSET',
+        format: 'JSON',
+        partitionOffsets: 'p0:10,p1:20',
+      })
+    );
+
+    expect(mock.calls()).toHaveLength(1);
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  it('downloads with per-partition inclusive offset ranges', async () => {
+    const path = `/api/clusters/${clusterName}/topics/${topicName}/messages/download?limit=5&downloadMode=FROM_OFFSET&format=JSON&partitionOffsetRanges=p0%3A10-15%2Cp1%3A20-25`;
+    const mock = fetchMock.getOnce(path, {
+      body: 'zip-content',
+      headers: {
+        'content-type': 'application/zip',
+      },
+    });
+    const { result } = renderHook(() => hooks.useDownloadMessagesZip(), {
+      wrapper: TestQueryClientProvider,
+    });
+
+    await act(() =>
+      result.current.mutateAsync({
+        clusterName,
+        topicName,
+        limit: 5,
+        downloadMode: 'FROM_OFFSET',
+        format: 'JSON',
+        partitionOffsetRanges: 'p0:10-15,p1:20-25',
+      })
+    );
+
+    expect(mock.calls()).toHaveLength(1);
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+
   it('uploads topic message files', async () => {
     const path = `/api/clusters/${clusterName}/topics/${topicName}/messages/upload`;
     const response = {

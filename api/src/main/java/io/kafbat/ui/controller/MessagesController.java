@@ -28,6 +28,7 @@ import io.kafbat.ui.serde.api.Serde;
 import io.kafbat.ui.service.DeserializationService;
 import io.kafbat.ui.service.MessagesService;
 import io.kafbat.ui.service.MessagesService.DownloadFormat;
+import io.kafbat.ui.service.MessagesService.OffsetRange;
 import io.kafbat.ui.service.MessagesService.UploadKeyMode;
 import io.kafbat.ui.service.MessagesService.UploadMessagesOptions;
 import io.kafbat.ui.service.MessagesService.UploadMessagesResult;
@@ -37,8 +38,10 @@ import io.kafbat.ui.service.MessagesService.UploadSourceFile;
 import io.kafbat.ui.service.mcp.McpTool;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import javax.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -129,6 +132,13 @@ public class MessagesController extends AbstractController implements MessagesAp
                                                          String smartFilterId,
                                                          String keySerde,
                                                          String valueSerde,
+                                                         String downloadMode,
+                                                         Long offset,
+                                                         Long timestamp,
+                                                         Long timestampTo,
+                                                         String format,
+                                                         String partitionOffsets,
+                                                         String partitionOffsetRanges,
                                                          ServerWebExchange exchange) {
     var context = AccessContext.builder()
         .cluster(clusterName)
@@ -139,8 +149,11 @@ public class MessagesController extends AbstractController implements MessagesAp
     return validateAccess(context).then(
         Mono.defer(() -> {
           int downloadLimit = messagesService.resolveDownloadLimit(limit);
-          PollingModeDTO pollingMode = resolveDownloadMode(exchange);
-          DownloadFormat format = DownloadFormat.fromRequest(firstQueryParam(exchange, "format"));
+          PollingModeDTO pollingMode = resolveDownloadMode(downloadMode, exchange);
+          DownloadFormat downloadFormat = DownloadFormat.fromRequest(format);
+          Map<Integer, Long> parsedPartitionOffsets = parsePartitionOffsets(partitionOffsets);
+          Map<Integer, OffsetRange> parsedPartitionOffsetRanges =
+              parsePartitionOffsetRanges(partitionOffsetRanges);
           return messagesService.downloadMessages(
                   getCluster(clusterName),
                   topicName,
@@ -151,12 +164,14 @@ public class MessagesController extends AbstractController implements MessagesAp
                   keySerde,
                   valueSerde,
                   pollingMode,
-                  queryParamAsLong(exchange, "offset"),
-                  queryParamAsLong(exchange, "timestamp"),
-                  queryParamAsLong(exchange, "timestampTo"),
-                  format,
+                  offset,
+                  timestamp,
+                  timestampTo,
+                  downloadFormat,
                   searchOption(exchange, "searchMatch", "ALL", "ANY"),
-                  searchOption(exchange, "searchScope", "ALL", "HEADERS")
+                  searchOption(exchange, "searchScope", "ALL", "HEADERS"),
+                  parsedPartitionOffsets,
+                  parsedPartitionOffsetRanges
               )
               .map(result -> ResponseEntity.ok()
                   .contentType(MediaType.parseMediaType(result.mediaType()))
@@ -435,8 +450,8 @@ public class MessagesController extends AbstractController implements MessagesAp
     return part instanceof FormFieldPart formFieldPart ? formFieldPart.value() : null;
   }
 
-  private PollingModeDTO resolveDownloadMode(ServerWebExchange exchange) {
-    String value = Optional.ofNullable(firstQueryParam(exchange, "downloadMode"))
+  private PollingModeDTO resolveDownloadMode(String downloadMode, ServerWebExchange exchange) {
+    String value = Optional.ofNullable(downloadMode)
         .orElseGet(() -> firstQueryParam(exchange, "mode"));
     if (value == null || value.isBlank()) {
       return PollingModeDTO.LATEST;
@@ -448,15 +463,87 @@ public class MessagesController extends AbstractController implements MessagesAp
     }
   }
 
-  private Long queryParamAsLong(ServerWebExchange exchange, String name) {
-    String value = firstQueryParam(exchange, name);
+  private Map<Integer, Long> parsePartitionOffsets(String value) {
     if (value == null || value.isBlank()) {
-      return null;
+      return Map.of();
+    }
+
+    Map<Integer, Long> offsets = new LinkedHashMap<>();
+    for (String rawItem : value.split(",")) {
+      String item = rawItem.trim();
+      if (item.isEmpty()) {
+        continue;
+      }
+      String[] parts = item.split(":", -1);
+      if (parts.length != 2) {
+        throw new ValidationException("partitionOffsets must use p0:123,p1:456 format");
+      }
+      int partition = parsePartition(parts[0], "partitionOffsets");
+      long offset = parseNonNegativeLong(parts[1], "partitionOffsets");
+      if (offsets.putIfAbsent(partition, offset) != null) {
+        throw new ValidationException("Duplicate partition in partitionOffsets: " + partition);
+      }
+    }
+    return offsets;
+  }
+
+  private Map<Integer, OffsetRange> parsePartitionOffsetRanges(String value) {
+    if (value == null || value.isBlank()) {
+      return Map.of();
+    }
+
+    Map<Integer, OffsetRange> ranges = new LinkedHashMap<>();
+    for (String rawItem : value.split(",")) {
+      String item = rawItem.trim();
+      if (item.isEmpty()) {
+        continue;
+      }
+      String[] parts = item.split(":", -1);
+      if (parts.length != 2) {
+        throw new ValidationException("partitionOffsetRanges must use p0:100-200,p1:500-600 format");
+      }
+      String[] rangeParts = parts[1].split("-", -1);
+      if (rangeParts.length != 2) {
+        throw new ValidationException("partitionOffsetRanges must use p0:100-200,p1:500-600 format");
+      }
+      int partition = parsePartition(parts[0], "partitionOffsetRanges");
+      long startOffset = parseNonNegativeLong(rangeParts[0], "partitionOffsetRanges");
+      long endOffset = parseNonNegativeLong(rangeParts[1], "partitionOffsetRanges");
+      if (endOffset < startOffset) {
+        throw new ValidationException("Range end offset must be greater than or equal to start offset");
+      }
+      if (ranges.putIfAbsent(partition, new OffsetRange(startOffset, endOffset)) != null) {
+        throw new ValidationException("Duplicate partition in partitionOffsetRanges: " + partition);
+      }
+    }
+    return ranges;
+  }
+
+  private int parsePartition(String value, String queryParam) {
+    String normalized = value.trim();
+    if (normalized.toLowerCase(Locale.ROOT).startsWith("p")) {
+      normalized = normalized.substring(1);
     }
     try {
-      return Long.valueOf(value);
+      int partition = Integer.parseInt(normalized);
+      if (partition < 0) {
+        throw new NumberFormatException("negative partition");
+      }
+      return partition;
     } catch (NumberFormatException e) {
-      throw new ValidationException("Query parameter '" + name + "' must be a number");
+      throw new ValidationException("Query parameter '" + queryParam + "' contains an invalid partition");
+    }
+  }
+
+  private long parseNonNegativeLong(String value, String queryParam) {
+    try {
+      long parsed = Long.parseLong(value.trim());
+      if (parsed < 0) {
+        throw new NumberFormatException("negative offset");
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new ValidationException("Query parameter '" + queryParam + "' contains an invalid offset");
     }
   }
 

@@ -46,6 +46,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -67,7 +68,9 @@ import javax.annotation.Nullable;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -75,6 +78,7 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.openapitools.jackson.nullable.JsonNullable;
+import org.apache.kafka.common.utils.Bytes;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -224,6 +228,17 @@ public class MessagesService {
   }
 
   public record UploadSourceFile(String fileName, byte[] content) {}
+
+  public record OffsetRange(long startOffset, long endOffset) {
+    public OffsetRange {
+      if (startOffset < 0 || endOffset < 0) {
+        throw new ValidationException("Offset ranges must not contain negative offsets");
+      }
+      if (endOffset < startOffset) {
+        throw new ValidationException("Range end offset must be greater than or equal to start offset");
+      }
+    }
+  }
 
   public record UploadMessagesOptions(
       UploadParseMode parseMode,
@@ -1037,6 +1052,19 @@ public class MessagesService {
       @Nullable String keySerde, @Nullable String valueSerde, PollingModeDTO pollingMode,
       @Nullable Long offset, @Nullable Long timestamp, @Nullable Long timestampTo,
       DownloadFormat format, boolean matchAny, boolean headersOnly) {
+    return downloadMessages(cluster, topic, limit, partitions, containsStringFilters,
+        smartFilterId, keySerde, valueSerde, pollingMode, offset, timestamp, timestampTo,
+        format, matchAny, headersOnly, Map.of(), Map.of());
+  }
+
+  public Mono<DownloadResult> downloadMessages(
+      KafkaCluster cluster, String topic, int limit, List<Integer> partitions,
+      @Nullable List<String> containsStringFilters, @Nullable String smartFilterId,
+      @Nullable String keySerde, @Nullable String valueSerde, PollingModeDTO pollingMode,
+      @Nullable Long offset, @Nullable Long timestamp, @Nullable Long timestampTo,
+      DownloadFormat format, boolean matchAny, boolean headersOnly,
+      @Nullable Map<Integer, Long> partitionOffsets,
+      @Nullable Map<Integer, OffsetRange> partitionOffsetRanges) {
     String fileName = downloadFileName(topic, limit, pollingMode, format);
     return collectDownloadMessages(
             cluster,
@@ -1050,7 +1078,7 @@ public class MessagesService {
             pollingMode,
             offset,
             timestamp,
-            timestampTo, matchAny, headersOnly)
+            timestampTo, matchAny, headersOnly, partitionOffsets, partitionOffsetRanges)
         .map(
             messages ->
                 new DownloadResult(
@@ -1081,15 +1109,59 @@ public class MessagesService {
       @Nullable String keySerde, @Nullable String valueSerde, PollingModeDTO pollingMode,
       @Nullable Long offset, @Nullable Long timestamp, @Nullable Long timestampTo,
       boolean matchAny, boolean headersOnly) {
+    return collectDownloadMessages(cluster, topic, limit, partitions, containsStringFilters,
+        smartFilterId, keySerde, valueSerde, pollingMode, offset, timestamp, timestampTo,
+        matchAny, headersOnly, Map.of(), Map.of());
+  }
+
+  private Mono<List<TopicMessageDTO>> collectDownloadMessages(
+      KafkaCluster cluster, String topic, int limit, List<Integer> partitions,
+      @Nullable List<String> containsStringFilters, @Nullable String smartFilterId,
+      @Nullable String keySerde, @Nullable String valueSerde, PollingModeDTO pollingMode,
+      @Nullable Long offset, @Nullable Long timestamp, @Nullable Long timestampTo,
+      boolean matchAny, boolean headersOnly,
+      @Nullable Map<Integer, Long> partitionOffsets,
+      @Nullable Map<Integer, OffsetRange> partitionOffsetRanges) {
     if (limit < 1 || limit > maxPageSize) {
       return Mono.error(
           new ValidationException("Download limit must be between 1 and " + maxPageSize));
     }
 
+    Map<Integer, Long> safePartitionOffsets = Optional.ofNullable(partitionOffsets).orElse(Map.of());
+    Map<Integer, OffsetRange> safePartitionOffsetRanges =
+        Optional.ofNullable(partitionOffsetRanges).orElse(Map.of());
+    validateAdvancedOffsetFilters(offset, timestamp, timestampTo,
+        safePartitionOffsets, safePartitionOffsetRanges);
+
+    if (!safePartitionOffsetRanges.isEmpty()) {
+      return collectMessagesByOffsetRanges(cluster, topic, limit, containsStringFilters,
+          smartFilterId, keySerde, valueSerde, matchAny, headersOnly, timestampTo,
+          safePartitionOffsetRanges);
+    }
+
+    ConsumerPosition consumerPosition;
+    if (!safePartitionOffsets.isEmpty()) {
+      Map<TopicPartition, Long> tpOffsets = new LinkedHashMap<>();
+      safePartitionOffsets.forEach((partition, partitionOffset) -> {
+        if (partitionOffset < 0) {
+          throw new ValidationException("partitionOffsets must not contain negative offsets");
+        }
+        tpOffsets.put(new TopicPartition(topic, partition), partitionOffset);
+      });
+      consumerPosition = new ConsumerPosition(
+          PollingModeDTO.FROM_OFFSET,
+          topic,
+          List.copyOf(tpOffsets.keySet()),
+          null,
+          new ConsumerPosition.Offsets(null, tpOffsets));
+    } else {
+      consumerPosition = ConsumerPosition.create(pollingMode, topic, partitions, timestamp, offset);
+    }
+
     return loadMessages(
             cluster,
             topic,
-            ConsumerPosition.create(pollingMode, topic, partitions, timestamp, offset),
+            consumerPosition,
             Optional.ofNullable(containsStringFilters).orElse(List.of()),
             smartFilterId,
             limit,
@@ -1100,11 +1172,199 @@ public class MessagesService {
         .collectList();
   }
 
+  private void validateAdvancedOffsetFilters(@Nullable Long offset,
+                                             @Nullable Long timestamp,
+                                             @Nullable Long timestampTo,
+                                             Map<Integer, Long> partitionOffsets,
+                                             Map<Integer, OffsetRange> partitionOffsetRanges) {
+    if (!partitionOffsets.isEmpty() && !partitionOffsetRanges.isEmpty()) {
+      throw new ValidationException("Use either partitionOffsets or partitionOffsetRanges, not both");
+    }
+    if (!partitionOffsets.isEmpty() && offset != null) {
+      throw new ValidationException("Use either offset or partitionOffsets, not both");
+    }
+    if ((!partitionOffsets.isEmpty() || !partitionOffsetRanges.isEmpty())
+        && (timestamp != null || timestampTo != null)) {
+      throw new ValidationException("Per-partition offset filters cannot be combined with timestamp filters");
+    }
+  }
+
+  private Mono<List<TopicMessageDTO>> collectMessagesByOffsetRanges(
+      KafkaCluster cluster, String topic, int limit,
+      @Nullable List<String> containsStringFilters, @Nullable String smartFilterId,
+      @Nullable String keySerde, @Nullable String valueSerde,
+      boolean matchAny, boolean headersOnly, @Nullable Long timestampTo,
+      Map<Integer, OffsetRange> ranges) {
+    return withExistingTopic(cluster, topic)
+        .publishOn(Schedulers.boundedElastic())
+        .map(topicDescription -> loadMessagesByOffsetRanges(
+            cluster, topicDescription, topic, limit, containsStringFilters, smartFilterId,
+            keySerde, valueSerde, matchAny, headersOnly, timestampTo, ranges));
+  }
+
+  private List<TopicMessageDTO> loadMessagesByOffsetRanges(KafkaCluster cluster,
+                                                           TopicDescription topicDescription,
+                                                           String topic,
+                                                           int limit,
+                                                           @Nullable List<String> containsStringFilters,
+                                                           @Nullable String smartFilterId,
+                                                           @Nullable String keySerde,
+                                                           @Nullable String valueSerde,
+                                                           boolean matchAny,
+                                                           boolean headersOnly,
+                                                           @Nullable Long timestampTo,
+                                                           Map<Integer, OffsetRange> ranges) {
+    Set<Integer> actualPartitions = topicDescription.partitions()
+        .stream()
+        .map(partition -> partition.partition())
+        .collect(Collectors.toSet());
+    List<Integer> requestedPartitions = ranges.keySet().stream().distinct().sorted().toList();
+    if (!actualPartitions.containsAll(requestedPartitions)) {
+      throw new ValidationException("One or more requested partitions do not exist");
+    }
+
+    List<TopicPartition> topicPartitions = requestedPartitions.stream()
+        .map(partition -> new TopicPartition(topic, partition))
+        .toList();
+    if (topicPartitions.isEmpty()) {
+      return List.of();
+    }
+
+    try (var consumer = consumerGroupService.createConsumer(cluster,
+        Map.of(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, limit))) {
+      Map<TopicPartition, Long> beginningOffsets = consumer.beginningOffsets(topicPartitions);
+      Map<TopicPartition, Long> endOffsets = consumer.endOffsets(topicPartitions);
+      Map<TopicPartition, Long> seekOffsets = new LinkedHashMap<>();
+      Map<TopicPartition, Long> stopOffsets = new LinkedHashMap<>();
+
+      requestedPartitions.forEach(partition -> {
+        TopicPartition topicPartition = new TopicPartition(topic, partition);
+        OffsetRange requestedRange = ranges.get(partition);
+        long beginningOffset = beginningOffsets.get(topicPartition);
+        long endOffset = endOffsets.get(topicPartition);
+        long startOffset = Math.max(requestedRange.startOffset(), beginningOffset);
+        long exclusiveEndOffset = Math.min(inclusiveEndToExclusive(requestedRange.endOffset()), endOffset);
+        if (startOffset < exclusiveEndOffset) {
+          seekOffsets.put(topicPartition, startOffset);
+          stopOffsets.put(topicPartition, exclusiveEndOffset);
+        }
+      });
+
+      if (seekOffsets.isEmpty()) {
+        return List.of();
+      }
+
+      ConsumerRecordDeserializer deserializer = deserializationService.deserializerFor(
+          cluster,
+          topic,
+          keySerde,
+          valueSerde
+      );
+      Predicate<TopicMessageDTO> filter = getMsgFilter(
+          Optional.ofNullable(containsStringFilters).orElse(List.of()), smartFilterId, matchAny, headersOnly);
+      if (timestampTo != null) {
+        filter = filter.and(message -> matchesTimestampUpperBound(message, timestampTo));
+      }
+      List<TopicMessageDTO> messages = new ArrayList<>();
+      var completedPartitions = new HashSet<TopicPartition>();
+      int emptyPollsWithoutProgress = 0;
+
+      consumer.assign(seekOffsets.keySet());
+      seekOffsets.forEach(consumer::seek);
+
+      while (completedPartitions.size() < seekOffsets.size() && messages.size() < limit) {
+        Map<TopicPartition, Long> positionsBeforePoll = activePositions(consumer, seekOffsets, completedPartitions);
+        var polledRecords = consumer.pollEnhanced(cluster.getPollingSettings().getPollTimeout());
+
+        for (TopicPartition topicPartition : seekOffsets.keySet()) {
+          if (completedPartitions.contains(topicPartition) || messages.size() >= limit) {
+            continue;
+          }
+          addRangeMessages(
+              polledRecords.records(topicPartition),
+              stopOffsets.get(topicPartition),
+              deserializer,
+              filter,
+              messages,
+              limit
+          );
+          if (consumer.position(topicPartition) >= stopOffsets.get(topicPartition)) {
+            completedPartitions.add(topicPartition);
+            consumer.pause(List.of(topicPartition));
+          }
+        }
+
+        if (polledRecords.count() == 0
+            && !positionsAdvanced(consumer, positionsBeforePoll)
+            && messages.size() < limit) {
+          emptyPollsWithoutProgress++;
+          if (emptyPollsWithoutProgress >= 3) {
+            break;
+          }
+        } else {
+          emptyPollsWithoutProgress = 0;
+        }
+      }
+
+      return sortRangeDownloadMessages(messages);
+    }
+  }
+
+  private Map<TopicPartition, Long> activePositions(Consumer<?, ?> consumer,
+                                                    Map<TopicPartition, Long> seekOffsets,
+                                                    Set<TopicPartition> completedPartitions) {
+    Map<TopicPartition, Long> positions = new LinkedHashMap<>();
+    seekOffsets.keySet().stream()
+        .filter(topicPartition -> !completedPartitions.contains(topicPartition))
+        .forEach(topicPartition -> positions.put(topicPartition, consumer.position(topicPartition)));
+    return positions;
+  }
+
+  private boolean positionsAdvanced(Consumer<?, ?> consumer,
+                                    Map<TopicPartition, Long> positionsBeforePoll) {
+    return positionsBeforePoll.entrySet()
+        .stream()
+        .anyMatch(entry -> consumer.position(entry.getKey()) > entry.getValue());
+  }
+
+  private void addRangeMessages(List<ConsumerRecord<Bytes, Bytes>> records,
+                                long exclusiveEndOffset,
+                                ConsumerRecordDeserializer deserializer,
+                                Predicate<TopicMessageDTO> filter,
+                                List<TopicMessageDTO> messages,
+                                int limit) {
+    for (ConsumerRecord<Bytes, Bytes> record : records) {
+      if (messages.size() >= limit || record.offset() >= exclusiveEndOffset) {
+        return;
+      }
+      TopicMessageDTO message = deserializer.deserialize(record);
+      try {
+        if (filter.test(message)) {
+          messages.add(message);
+        }
+      } catch (Exception e) {
+        log.trace("Error applying filter for message {}", message);
+      }
+    }
+  }
+
+  private List<TopicMessageDTO> sortRangeDownloadMessages(List<TopicMessageDTO> messages) {
+    return messages.stream()
+        .sorted(Comparator.comparing(TopicMessageDTO::getPartition)
+            .thenComparing(TopicMessageDTO::getOffset))
+        .toList();
+  }
+
+  private long inclusiveEndToExclusive(long inclusiveEndOffset) {
+    return inclusiveEndOffset == Long.MAX_VALUE ? Long.MAX_VALUE : inclusiveEndOffset + 1;
+  }
+
   public Mono<UploadMessagesResult> uploadMessages(
       KafkaCluster cluster,
       String topic,
       List<UploadSourceFile> files,
       UploadMessagesOptions options) {
+
     if (files.isEmpty()) {
       return Mono.error(new ValidationException("At least one upload file is required"));
     }

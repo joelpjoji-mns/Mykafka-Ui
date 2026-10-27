@@ -24,15 +24,15 @@ export function useClusters(options: { waitForCluster?: ClusterName } = {}) {
       : false,
   });
 }
+export const clusterStatsQueryOptions = (clusterName: ClusterName) => ({
+  queryKey: ['clusterStats', clusterName] as const,
+  queryFn: () => api.getClusterStats({ clusterName }),
+  staleTime: 30_000,
+});
+
 export function useClusterStats(clusterName: ClusterName) {
   return useSuspenseQuery({
     ...clusterStatsQueryOptions(clusterName),
     refetchInterval: 5000,
   });
 }
-
-export const clusterStatsQueryOptions = (clusterName: ClusterName) => ({
-  queryKey: ['clusterStats', clusterName] as const,
-  queryFn: () => api.getClusterStats({ clusterName }),
-  staleTime: 30_000,
-});

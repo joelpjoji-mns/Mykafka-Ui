@@ -112,6 +112,13 @@ interface MessagesApi {
     @query smartFilterId?: string,
     @query keySerde?: string,
     @query valueSerde?: string,
+    @query downloadMode?: string,
+    @query offset?: int64,
+    @query timestamp?: int64,
+    @query timestampTo?: int64,
+    @query format?: string,
+    @query partitionOffsets?: string,
+    @query partitionOffsetRanges?: string,
   ): ZipResponse | ApiNotFoundResponse | ApiBadRequestResponse;
 }
 

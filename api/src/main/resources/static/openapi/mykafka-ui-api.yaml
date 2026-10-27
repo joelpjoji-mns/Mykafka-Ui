@@ -3021,6 +3021,51 @@ paths:
           schema:
             type: string
           explode: false
+        - name: downloadMode
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
+        - name: timestamp
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
+        - name: timestampTo
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: partitionOffsets
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: partitionOffsetRanges
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
       responses:
         '200':
           description: The request has succeeded.

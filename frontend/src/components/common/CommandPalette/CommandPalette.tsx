@@ -99,13 +99,12 @@ const CommandPalette: React.FC = () => {
 
   return (
     <S.Overlay onClick={close} data-testid="command-palette">
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      {}
       <S.Panel
         onClick={(event) => event.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         <S.SearchInput
-          // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
           type="text"
           placeholder="Search topics, consumer groups, schemas, connectors…"

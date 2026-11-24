@@ -73,10 +73,8 @@ public class ConsumerGroupService {
                               .map(
                                   desc -> {
                                     var groupOffsets = committedOffsets.row(desc.groupId());
-                                                                        var endOffsetsForGroup = endOffsetsForGroup(
-                                                                                groupOffsets,
-                                                                                endOffsets
-                                                                        );
+                                    var endOffsetsForGroup =
+                                        endOffsetsForGroup(groupOffsets, endOffsets);
                                     // 3. gathering description & offsets
                                     return InternalConsumerGroup.create(
                                         desc, groupOffsets, endOffsetsForGroup);
@@ -84,20 +82,6 @@ public class ConsumerGroupService {
                               .collect(Collectors.toList()));
             });
   }
-
-    @VisibleForTesting
-    static Map<TopicPartition, Long> endOffsetsForGroup(
-            Map<TopicPartition, Long> groupOffsets,
-            Map<TopicPartition, Long> endOffsets) {
-        var result = new HashMap<TopicPartition, Long>();
-        groupOffsets.keySet().forEach(topicPartition -> {
-            Long endOffset = endOffsets.get(topicPartition);
-            if (endOffset != null) {
-                result.put(topicPartition, endOffset);
-            }
-        });
-        return result;
-    }
 
   private Mono<List<InternalConsumerGroup>> getConsumerGroups(
       KafkaCluster cluster, ReactiveAdminClient ac, List<ConsumerGroupDescription> descriptions) {
@@ -176,6 +160,19 @@ public class ConsumerGroupService {
                                                         allGroups.size(),
                                                         pageNum,
                                                         perPage)))));
+  }
+
+  @VisibleForTesting
+  static Map<TopicPartition, Long> endOffsetsForGroup(
+      Map<TopicPartition, Long> groupOffsets, Map<TopicPartition, Long> endOffsets) {
+    var result = new HashMap<TopicPartition, Long>();
+    groupOffsets.keySet().forEach(topicPartition -> {
+      Long endOffset = endOffsets.get(topicPartition);
+      if (endOffset != null) {
+        result.put(topicPartition, endOffset);
+      }
+    });
+    return result;
   }
 
   private Optional<InternalConsumerGroup> getConsumerGroup(

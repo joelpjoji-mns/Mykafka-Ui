@@ -114,7 +114,9 @@ describe('MessageResetOffsetsModal', () => {
     expect(screen.getByText('Selected message offset')).toBeInTheDocument();
     expect(screen.getByText('Log end offset')).toBeInTheDocument();
     expect(
-      screen.getByText('This reset will replay 5 messages.')
+      screen.getByText(
+        'The reset moves the offset back by 5 offset positions; Kafka may replay a different number of records because offsets can have gaps.'
+      )
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Reset offset' }));
 
@@ -146,6 +148,40 @@ describe('MessageResetOffsetsModal', () => {
         waitForInactive: true,
       });
     });
+  });
+
+  it('describes skipped offset distance without implying an exact record count', async () => {
+    (useConsumerGroupOffsetsResetPreview as jest.Mock).mockReturnValue({
+      data: {
+        topic: 'orders',
+        resetType: ConsumerGroupOffsetsResetType.OFFSET,
+        partitions: [
+          {
+            partition: 3,
+            currentCommittedOffset: 47,
+            requestedOffset: 50,
+            targetOffset: 50,
+            logStartOffset: 0,
+            logEndOffset: 100,
+            impact: ConsumerGroupOffsetResetImpact.SKIP,
+            affectedMessages: 3,
+            targetAdjusted: false,
+          },
+        ],
+      },
+      isError: false,
+      isFetching: false,
+      isLoading: false,
+    });
+    render(<MessageResetOffsetsModal message={message} onClose={onClose} />);
+
+    await selectConsumerGroup('orders-primary');
+
+    expect(
+      screen.getByText(
+        'The reset moves the offset forward by 3 offset positions; Kafka may skip a different number of records because offsets can have gaps.'
+      )
+    ).toBeInTheDocument();
   });
 
   it('uses the timestamp from an SSE message without requiring a Date object', async () => {
@@ -248,6 +284,40 @@ describe('MessageResetOffsetsModal', () => {
     expect(
       screen.getByText('Calculating the current offset impact.')
     ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset offset' })).toBeDisabled();
+  });
+
+  it('keeps reset disabled and hides stale plan data when the plan refresh fails', async () => {
+    (useConsumerGroupOffsetsResetPreview as jest.Mock).mockReturnValue({
+      data: {
+        topic: 'orders',
+        resetType: ConsumerGroupOffsetsResetType.OFFSET,
+        partitions: [
+          {
+            partition: 3,
+            currentCommittedOffset: 47,
+            requestedOffset: 42,
+            targetOffset: 42,
+            logStartOffset: 0,
+            logEndOffset: 100,
+            impact: ConsumerGroupOffsetResetImpact.REPLAY,
+            affectedMessages: 5,
+            targetAdjusted: false,
+          },
+        ],
+      },
+      isError: true,
+      isFetching: false,
+      isLoading: false,
+    });
+    render(<MessageResetOffsetsModal message={message} onClose={onClose} />);
+
+    await selectConsumerGroup('orders-primary');
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Reset stays unavailable until a live plan is available'
+    );
+    expect(screen.queryByText('Planned target offset')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reset offset' })).toBeDisabled();
   });
 });

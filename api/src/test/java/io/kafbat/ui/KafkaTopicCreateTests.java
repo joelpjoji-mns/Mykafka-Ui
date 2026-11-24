@@ -61,28 +61,28 @@ class KafkaTopicCreateTests extends AbstractIntegrationTest {
   @Test
   void shouldRecreateExistingTopicSuccessfully() {
     TopicCreationDTO topicCreation = new TopicCreationDTO()
-            .replicationFactor(1)
-            .partitions(3)
-            .name(UUID.randomUUID().toString());
+        .replicationFactor(1)
+        .partitions(3)
+        .name(UUID.randomUUID().toString());
 
     webTestClient.post()
-            .uri("/api/clusters/{clusterName}/topics", LOCAL)
-            .bodyValue(topicCreation)
-            .exchange()
-            .expectStatus()
-            .isOk();
+        .uri("/api/clusters/{clusterName}/topics", LOCAL)
+        .bodyValue(topicCreation)
+        .exchange()
+        .expectStatus()
+        .isOk();
 
-              statisticsService.updateCache(clustersStorage.getClusterByName(LOCAL).orElseThrow()).block();
+    statisticsService.updateCache(clustersStorage.getClusterByName(LOCAL).orElseThrow()).block();
 
     webTestClient.post()
-            .uri("/api/clusters/{clusterName}/topics/" + topicCreation.getName(), LOCAL)
-            .exchange()
-            .expectStatus()
-            .isCreated()
-            .expectBody()
-            .jsonPath("partitionCount").isEqualTo(topicCreation.getPartitions().toString())
-            .jsonPath("replicationFactor").isEqualTo(topicCreation.getReplicationFactor().toString())
-            .jsonPath("name").isEqualTo(topicCreation.getName());
+        .uri("/api/clusters/{clusterName}/topics/" + topicCreation.getName(), LOCAL)
+        .exchange()
+        .expectStatus()
+        .isCreated()
+        .expectBody()
+        .jsonPath("partitionCount").isEqualTo(topicCreation.getPartitions().toString())
+        .jsonPath("replicationFactor").isEqualTo(topicCreation.getReplicationFactor().toString())
+        .jsonPath("name").isEqualTo(topicCreation.getName());
   }
 
   @Test

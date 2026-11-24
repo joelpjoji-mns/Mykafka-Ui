@@ -3,11 +3,7 @@ import React from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 export type FtsAvailableResource =
-  | 'topics'
-  | 'acl'
-  | 'consumer_groups'
-  | 'connects'
-  | 'schemas';
+  'topics' | 'acl' | 'consumer_groups' | 'connects' | 'schemas';
 
 const storageName = 'kafbat-ui_fts';
 

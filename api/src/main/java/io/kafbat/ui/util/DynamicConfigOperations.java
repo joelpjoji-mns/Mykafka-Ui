@@ -9,6 +9,7 @@ import io.kafbat.ui.exception.FileUploadException;
 import io.kafbat.ui.exception.ValidationException;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
@@ -121,6 +122,20 @@ public class DynamicConfigOperations {
 
   public Mono<Path> uploadConfigRelatedFile(FilePart file) {
     checkIfDynamicConfigEnabled();
+    String submittedFileName = file.filename();
+    if (submittedFileName == null || submittedFileName.isBlank()) {
+      throw new ValidationException("Uploaded file name must not be empty");
+    }
+    Path fileNamePath;
+    try {
+      fileNamePath = Path.of(submittedFileName.replace('\\', '/')).getFileName();
+    } catch (InvalidPathException e) {
+      throw new ValidationException("Uploaded file name is invalid");
+    }
+    if (fileNamePath == null || fileNamePath.toString().isBlank()
+        || ".".equals(fileNamePath.toString()) || "..".equals(fileNamePath.toString())) {
+      throw new ValidationException("Uploaded file name must identify a file");
+    }
     String targetDirStr = ctx.getEnvironment()
         .getProperty(CONFIG_RELATED_UPLOADS_DIR_PROPERTY, CONFIG_RELATED_UPLOADS_DIR_DEFAULT);
 
@@ -137,7 +152,7 @@ public class DynamicConfigOperations {
     }).subscribeOn(Schedulers.boundedElastic());
 
     return directoryCreationMono.flatMap(dir -> {
-      Path targetFilePath = dir.resolve(file.filename() + "-" + Instant.now().getEpochSecond());
+      Path targetFilePath = dir.resolve(fileNamePath + "-" + Instant.now().getEpochSecond());
       log.info("Uploading config-related file {}", targetFilePath);
       if (Files.exists(targetFilePath)) {
         log.info("File {} already exists, it will be overwritten", targetFilePath);
@@ -150,7 +165,7 @@ public class DynamicConfigOperations {
     });
   }
 
-  private void checkIfDynamicConfigEnabled() {
+  public void checkIfDynamicConfigEnabled() {
     if (!dynamicConfigEnabled()) {
       throw new ValidationException(
           "Dynamic config change is not allowed. "

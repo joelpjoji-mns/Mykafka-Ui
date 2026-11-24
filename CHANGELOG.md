@@ -35,8 +35,18 @@ This file describes the release policy and the durable product milestones. The G
 
 - Enabled HTTP response compression and long-lived immutable caching for hashed frontend assets.
 - Added short-lived caches for record sampling, Developer Hub insights and audit topic reads; tuned client-side caching and polling.
+- Added an opt-in setting to serve Prometheus metrics on a separately configured management port.
 - Pipelined message uploads, bounded ZIP extraction, and shared a global memory budget across concurrent size-sorted scans (fixing scans over 128 MB being evicted immediately).
 - Fixed offset resets for unknown partitions (500 → validation error), audit pages failing on tombstones or expiring under concurrent use, one bad topic failing Record Explorer, blank consumer lag between polls, sorted-page cursor drift after browser navigation, shared search links being overridden by saved drafts, Auto theme ignoring OS changes, and malformed schemas crashing the diff view.
+- Fixed Swagger "Try it out" targeting a hard-coded localhost URL instead of the current deployment host.
+- Kept offset-reset actions disabled when their live preview fails, rejected malformed partition-offset reset requests as validation errors, and clarified that impact estimates are offset distances rather than exact record counts.
+
+### Security and integration reliability
+
+- Fail closed when RBAC cannot resolve a user, and support RBAC with OAuth2 resource-server JWT and opaque bearer-token authentication.
+- Enforce dynamic-config enablement during validation, sanitize uploaded filenames and remote validation errors, and add RBAC checks and audit events to configuration, Kafka Connect, and schema endpoints.
+- Ported upstream fixes for dynamic-config mapping, broker metrics, admin-client exception filtering, empty MCP responses, read-only offset deletion, and consumer-lag CSV export.
+- Updated vulnerable dependencies, including Jackson, Netty, Confluent Kafka clients, LZ4, `fast-uri`, and `source-map-js`; upgraded the Azul Zulu runtime base image and Alpine packages.
 
 ## Historical Context
 

@@ -157,7 +157,9 @@ const Download: React.FC = () => {
   const [searchMatch, setSearchMatch] = useState('ALL');
   const [searchScope, setSearchScope] = useState('ALL');
   const [offset, setOffset] = useState('0');
-  const [partitionOffsets, setPartitionOffsets] = useState<Record<number, string>>({});
+  const [partitionOffsets, setPartitionOffsets] = useState<
+    Record<number, string>
+  >({});
   const [partitionOffsetRanges, setPartitionOffsetRanges] = useState<
     Record<number, PartitionOffsetRangeValues>
   >({});
@@ -522,12 +524,16 @@ const Download: React.FC = () => {
                   {partitionMode === 'SELECTED'
                     ? 'Advanced offsets use the selected partitions below.'
                     : 'Advanced offsets use every partition in this topic.'}{' '}
-                  The max messages value is a total ZIP cap across all partitions.
+                  The max messages value is a total ZIP cap across all
+                  partitions.
                 </HelperText>
                 {advancedPartitionOptions.length ? (
                   <OffsetRows>
                     {advancedPartitionOptions.map(({ label, value }) => (
-                      <OffsetRow key={value} $range={isPartitionOffsetRangesMode}>
+                      <OffsetRow
+                        key={value}
+                        $range={isPartitionOffsetRangesMode}
+                      >
                         <PartitionBadge>{label}</PartitionBadge>
                         {isPartitionOffsetsMode && (
                           <OffsetField>
@@ -538,7 +544,9 @@ const Download: React.FC = () => {
                               inputMode="numeric"
                               pattern="[0-9]*"
                               value={partitionOffsets[value] || '0'}
-                              onChange={({ target }: ChangeEvent<HTMLInputElement>) => {
+                              onChange={({
+                                target,
+                              }: ChangeEvent<HTMLInputElement>) => {
                                 updatePartitionOffset(value, target.value);
                               }}
                             />
@@ -553,9 +561,17 @@ const Download: React.FC = () => {
                                 type="text"
                                 inputMode="numeric"
                                 pattern="[0-9]*"
-                                value={partitionOffsetRanges[value]?.start || '0'}
-                                onChange={({ target }: ChangeEvent<HTMLInputElement>) => {
-                                  updatePartitionOffsetRange(value, 'start', target.value);
+                                value={
+                                  partitionOffsetRanges[value]?.start || '0'
+                                }
+                                onChange={({
+                                  target,
+                                }: ChangeEvent<HTMLInputElement>) => {
+                                  updatePartitionOffsetRange(
+                                    value,
+                                    'start',
+                                    target.value
+                                  );
                                 }}
                               />
                             </OffsetField>
@@ -571,8 +587,14 @@ const Download: React.FC = () => {
                                   partitionOffsetRanges[value]?.start ||
                                   '0'
                                 }
-                                onChange={({ target }: ChangeEvent<HTMLInputElement>) => {
-                                  updatePartitionOffsetRange(value, 'end', target.value);
+                                onChange={({
+                                  target,
+                                }: ChangeEvent<HTMLInputElement>) => {
+                                  updatePartitionOffsetRange(
+                                    value,
+                                    'end',
+                                    target.value
+                                  );
                                 }}
                               />
                             </OffsetField>
@@ -582,7 +604,9 @@ const Download: React.FC = () => {
                     ))}
                   </OffsetRows>
                 ) : (
-                  <HelperText>Select at least one partition to use this mode.</HelperText>
+                  <HelperText>
+                    Select at least one partition to use this mode.
+                  </HelperText>
                 )}
               </AdvancedOffsets>
             )}

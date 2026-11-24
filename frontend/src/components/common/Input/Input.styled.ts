@@ -47,9 +47,9 @@ export const Input = styled.input<InputProps>(
     border: 1px ${input.borderColor.normal} solid;
     border-radius: 4px;
     color: ${input.color.normal};
-    height: ${inputSize && INPUT_SIZES[inputSize]
-      ? INPUT_SIZES[inputSize]
-      : '40px'};
+    height: ${
+      inputSize && INPUT_SIZES[inputSize] ? INPUT_SIZES[inputSize] : '40px'
+    };
     width: 100%;
     padding-left: ${$search ? '36px' : '12px'};
     font-size: 14px;

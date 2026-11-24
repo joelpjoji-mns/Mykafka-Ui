@@ -111,6 +111,7 @@ public class ApplicationConfigController extends AbstractController implements A
         .operationName("validateConfig")
         .build();
     return validateAccess(context)
+        .then(Mono.fromRunnable(dynamicConfigOperations::checkIfDynamicConfigEnabled))
         .then(configDto)
         .flatMap(config -> {
           DynamicConfigOperations.PropertiesStructure newConfig = configMapper.fromDto(config.getProperties());

@@ -254,9 +254,11 @@ export const Availability = styled.div`
 
 export const AvailabilityItem = styled.span<{ $available: boolean }>(
   ({ theme, $available }) => css`
-    color: ${$available
-      ? theme.circularAlert.color.success
-      : theme.metrics.indicator.warningTextColor};
+    color: ${
+      $available
+        ? theme.circularAlert.color.success
+        : theme.metrics.indicator.warningTextColor
+    };
     font-size: 12px;
     font-weight: 500;
   `

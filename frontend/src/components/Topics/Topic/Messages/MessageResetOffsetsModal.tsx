@@ -34,8 +34,8 @@ const resetTypeOptions: SelectOption<ConsumerGroupOffsetsResetType>[] =
     value,
   }));
 
-const messagesLabel = (count: number) =>
-  `${count} ${count === 1 ? 'message' : 'messages'}`;
+const offsetDistanceLabel = (count: number) =>
+  `${count} offset ${count === 1 ? 'position' : 'positions'}`;
 
 const timestampToMillis = (timestamp: unknown): number | undefined => {
   let value = Number.NaN;
@@ -52,13 +52,13 @@ const timestampToMillis = (timestamp: unknown): number | undefined => {
 const impactSummary = (preview: ConsumerGroupOffsetsResetPartitionPreview) => {
   switch (preview.impact) {
     case ConsumerGroupOffsetResetImpact.REPLAY:
-      return `This reset will replay ${messagesLabel(
-        preview.affectedMessages || 0
-      )}.`;
+      return `The reset moves the offset back by ${offsetDistanceLabel(
+        preview.affectedMessages ?? 0
+      )}; Kafka may replay a different number of records because offsets can have gaps.`;
     case ConsumerGroupOffsetResetImpact.SKIP:
-      return `This reset will skip ${messagesLabel(
-        preview.affectedMessages || 0
-      )}.`;
+      return `The reset moves the offset forward by ${offsetDistanceLabel(
+        preview.affectedMessages ?? 0
+      )}; Kafka may skip a different number of records because offsets can have gaps.`;
     case ConsumerGroupOffsetResetImpact.NONE:
       return 'The planned offset matches the committed offset; no messages will be replayed or skipped.';
     case ConsumerGroupOffsetResetImpact.UNKNOWN:
@@ -208,7 +208,8 @@ const MessageResetOffsetsModal: React.FC<MessageResetOffsetsModalProps> = ({
               !consumerGroupId ||
               isTimestampMissing ||
               !partitionPreview ||
-              isPreviewLoading
+              isPreviewLoading ||
+              isResetPreviewError
             }
             inProgress={resetOffsets.isPending}
             onClick={reset}
@@ -316,7 +317,7 @@ const MessageResetOffsetsModal: React.FC<MessageResetOffsetsModalProps> = ({
                 until a live plan is available.
               </S.PlanError>
             )}
-            {partitionPreview && !isPreviewLoading && (
+            {partitionPreview && !isPreviewLoading && !isResetPreviewError && (
               <>
                 <S.PlanGrid>
                   <S.PlanMetric>

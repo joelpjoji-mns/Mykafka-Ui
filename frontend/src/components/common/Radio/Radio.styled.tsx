@@ -7,8 +7,9 @@ export const Item = styled.div<{
   $itemType: RadioItemType;
 }>`
   ${({ theme, $itemType }) => css`
-    background-color: ${theme.acl.create.radioButtons[$itemType].normal
-      .background};
+    background-color: ${
+      theme.acl.create.radioButtons[$itemType].normal.background
+    };
     border: 1px solid ${theme.acl.create.radioButtons[$itemType].normal.border};
     color: ${theme.acl.create.radioButtons[$itemType].normal.text};
     padding: 0 16px;
@@ -27,8 +28,9 @@ export const Item = styled.div<{
     }
     return css`
       &:hover {
-        background: ${theme.acl.create.radioButtons[$itemType].hover
-          .background};
+        background: ${
+          theme.acl.create.radioButtons[$itemType].hover.background
+        };
         border: 1px solid
           ${theme.acl.create.radioButtons[$itemType].hover.border};
         color: ${theme.acl.create.radioButtons[$itemType].hover.text};

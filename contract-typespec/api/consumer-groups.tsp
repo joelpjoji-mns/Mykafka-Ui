@@ -177,6 +177,7 @@ model ConsumerGroupOffsetsResetPartitionPreview {
   logStartOffset: int64;
   logEndOffset: int64;
   impact: ConsumerGroupOffsetResetImpact;
+  @doc("Offset distance; not a record count because Kafka offsets may contain gaps.")
   affectedMessages?: int64;
   targetAdjusted: boolean;
 }

@@ -11,13 +11,12 @@ type DropdownTriggerProps = {
   onClick?: React.MouseEventHandler<HTMLElement>;
 };
 
-interface DropdownProps
-  extends PropsWithChildren<
-    Omit<
-      Partial<ControlledMenuProps>,
-      'anchorRef' | 'menuButton' | 'onClose' | 'state'
-    >
-  > {
+interface DropdownProps extends PropsWithChildren<
+  Omit<
+    Partial<ControlledMenuProps>,
+    'anchorRef' | 'menuButton' | 'onClose' | 'state'
+  >
+> {
   label?: React.ReactNode;
   disabled?: boolean;
   openBtnEl?: React.ReactElement<DropdownTriggerProps>;

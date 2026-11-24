@@ -4,7 +4,6 @@ import static io.kafbat.ui.model.rbac.permission.ConsumerGroupAction.DELETE;
 import static io.kafbat.ui.model.rbac.permission.ConsumerGroupAction.RESET_OFFSETS;
 import static io.kafbat.ui.model.rbac.permission.ConsumerGroupAction.VIEW;
 import static java.lang.Boolean.TRUE;
-import static java.util.stream.Collectors.toMap;
 
 import io.kafbat.ui.api.ConsumerGroupsApi;
 import io.kafbat.ui.exception.ValidationException;
@@ -26,6 +25,7 @@ import io.kafbat.ui.model.rbac.permission.TopicAction;
 import io.kafbat.ui.service.ConsumerGroupService;
 import io.kafbat.ui.service.OffsetsResetService;
 import io.kafbat.ui.service.mcp.McpTool;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -360,14 +360,28 @@ public class ConsumerGroupsController extends AbstractController implements Cons
   }
 
   private Map<Integer, Long> resetOffsets(ConsumerGroupOffsetsResetDTO reset) {
-    if (CollectionUtils.isEmpty(reset.getPartitionsOffsets())) {
+    return toResetOffsets(reset.getPartitionsOffsets());
+  }
+
+  static Map<Integer, Long> toResetOffsets(List<PartitionOffsetDTO> partitionOffsets) {
+    if (CollectionUtils.isEmpty(partitionOffsets)) {
       throw new ValidationException("partitionsOffsets is required when OFFSET reset type used");
     }
-    return reset.getPartitionsOffsets().stream()
-        .collect(
-            toMap(
-                PartitionOffsetDTO::getPartition,
-                d -> Optional.ofNullable(d.getOffset()).orElse(0L)));
+    Map<Integer, Long> offsets = new LinkedHashMap<>();
+    for (PartitionOffsetDTO partitionOffset : partitionOffsets) {
+      if (partitionOffset == null || partitionOffset.getPartition() == null) {
+        throw new ValidationException("Each partition offset must include a partition");
+      }
+      Integer partition = partitionOffset.getPartition();
+      if (partition < 0) {
+        throw new ValidationException("Partition must be non-negative");
+      }
+      if (offsets.containsKey(partition)) {
+        throw new ValidationException("Duplicate partition offset for partition %s".formatted(partition));
+      }
+      offsets.put(partition, Optional.ofNullable(partitionOffset.getOffset()).orElse(0L));
+    }
+    return offsets;
   }
 
   private boolean waitForInactive(ConsumerGroupOffsetsResetDTO reset) {

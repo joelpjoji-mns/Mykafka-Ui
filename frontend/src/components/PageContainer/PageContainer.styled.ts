@@ -56,17 +56,21 @@ export const Sidebar = styled.div<{ $visible: boolean }>(
       -webkit-backdrop-filter: none;
     }
 
-    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    @supports not (
+      (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+    ) {
       background-color: ${theme.effects.reducedTransparencyNavigationSurface};
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
     }
 
     @media screen and (max-width: 1024px) {
-      ${$visible &&
-      css`
-        transform: translate3d(${theme.layout.navBarWidth}, 0, 0);
-      `};
+      ${
+        $visible &&
+        css`
+          transform: translate3d(${theme.layout.navBarWidth}, 0, 0);
+        `
+      };
       left: -${theme.layout.navBarWidth};
       z-index: 1000;
     }
@@ -106,15 +110,17 @@ export const Overlay = styled.div<{ $visible: boolean }>(
     left: 0;
     position: absolute;
     top: 0;
-    ${$visible &&
-    css`
-      @media screen and (max-width: 1024px) {
-        bottom: 0;
-        right: 0;
-        visibility: visible;
-        opacity: 0.7;
-        background-color: ${theme.layout.overlay.backgroundColor};
-      }
-    `}
+    ${
+      $visible &&
+      css`
+        @media screen and (max-width: 1024px) {
+          bottom: 0;
+          right: 0;
+          visibility: visible;
+          opacity: 0.7;
+          background-color: ${theme.layout.overlay.backgroundColor};
+        }
+      `
+    }
   `
 );

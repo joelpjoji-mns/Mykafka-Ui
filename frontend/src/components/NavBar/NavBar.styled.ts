@@ -29,7 +29,9 @@ export const Navbar = styled.nav(
       -webkit-backdrop-filter: none;
     }
 
-    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    @supports not (
+      (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+    ) {
       background-color: ${theme.effects.reducedTransparencyNavigationSurface};
       backdrop-filter: none;
       -webkit-backdrop-filter: none;

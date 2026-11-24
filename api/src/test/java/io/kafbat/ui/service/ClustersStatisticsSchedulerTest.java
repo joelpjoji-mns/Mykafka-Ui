@@ -23,7 +23,7 @@ class ClustersStatisticsSchedulerTest {
     var scheduler = new ClustersStatisticsScheduler(
         clustersStorage,
         statisticsService,
-      2
+        2
     );
     var clusters = List.of(
         KafkaCluster.builder().name("one").build(),

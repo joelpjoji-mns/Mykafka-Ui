@@ -236,8 +236,7 @@ function Table<TData>({
     onSortingChange: onSortingChange as OnChangeFn<SortingState>,
     onPaginationChange: onPaginationChange as OnChangeFn<PaginationState>,
     onColumnFiltersChange: onFilterChange as
-      | OnChangeFn<ColumnFiltersState>
-      | undefined,
+      OnChangeFn<ColumnFiltersState> | undefined,
     onColumnSizingChange: columnSizingPersister?.setColumnSizing,
     onRowSelectionChange: setRowSelection,
     getRowCanExpand,

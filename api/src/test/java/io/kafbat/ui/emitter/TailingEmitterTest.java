@@ -101,33 +101,33 @@ class TailingEmitterTest extends AbstractIntegrationTest {
         );
   }
 
-      @Test
-      void recentMessagesAreEmittedBeforeTheStreamContinuesWithNewMessages() throws Exception {
-      producer.send(new ProducerRecord<>(topic, "history-1", "history-1")).get();
-      producer.send(new ProducerRecord<>(topic, "history-2", "history-2")).get();
+  @Test
+  void recentMessagesAreEmittedBeforeTheStreamContinuesWithNewMessages() throws Exception {
+    producer.send(new ProducerRecord<>(topic, "history-1", "history-1")).get();
+    producer.send(new ProducerRecord<>(topic, "history-2", "history-2")).get();
 
-      var fluxOutput = startTailing(null);
+    var fluxOutput = startTailing(null);
 
-      Awaitility.await()
+    Awaitility.await()
         .atMost(Duration.ofSeconds(60))
         .pollInSameThread()
         .untilAsserted(() ->
-          assertThat(fluxOutput)
-            .filteredOn(msg -> msg.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
-            .extracting(msg -> msg.getMessage().getValue())
-            .contains("history-1", "history-2"));
+            assertThat(fluxOutput)
+                .filteredOn(msg -> msg.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
+                .extracting(msg -> msg.getMessage().getValue())
+                .contains("history-1", "history-2"));
 
-      producer.send(new ProducerRecord<>(topic, "live-1", "live-1")).get();
+    producer.send(new ProducerRecord<>(topic, "live-1", "live-1")).get();
 
-      Awaitility.await()
+    Awaitility.await()
         .atMost(Duration.ofSeconds(60))
         .pollInSameThread()
         .untilAsserted(() ->
-          assertThat(fluxOutput)
-            .filteredOn(msg -> msg.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
-            .extracting(msg -> msg.getMessage().getValue())
-            .contains("history-1", "history-2", "live-1"));
-      }
+            assertThat(fluxOutput)
+                .filteredOn(msg -> msg.getType() == TopicMessageEventDTO.TypeEnum.MESSAGE)
+                .extracting(msg -> msg.getMessage().getValue())
+                .contains("history-1", "history-2", "live-1"));
+  }
 
   private Flux<TopicMessageEventDTO> createTailingFlux(
       String topicName,

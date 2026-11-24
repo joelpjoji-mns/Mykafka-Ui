@@ -31,6 +31,9 @@ configurations.all {
 
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 
+// Override the Jackson version managed by the Spring Boot BOM for CVE fixes.
+ext['jackson-bom.version'] = libs.versions.jackson.bom.get()
+
 dependencies {
     implementation project(":contract")
     implementation project(":serde-api")

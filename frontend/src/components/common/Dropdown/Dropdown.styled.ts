@@ -66,7 +66,9 @@ export const Dropdown = styled(ControlledMenu)(
       }
     }
 
-    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    @supports not (
+      (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+    ) {
       ${menuSelector.name} {
         backdrop-filter: none;
         -webkit-backdrop-filter: none;

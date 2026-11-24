@@ -68,7 +68,7 @@ class RbacConnectorPermissionsTest {
     RoleBasedAccessControlProperties properties = mock();
     when(properties.getRoles()).thenReturn(roles);
 
-    accessControlService = new AccessControlService(null, properties, environment);
+    accessControlService = new AccessControlService(properties, environment);
     accessControlService.init();
 
     when(securityContext.getAuthentication()).thenReturn(authentication);

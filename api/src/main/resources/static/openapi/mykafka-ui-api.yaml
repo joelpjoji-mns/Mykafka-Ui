@@ -4919,6 +4919,7 @@ components:
         affectedMessages:
           type: integer
           format: int64
+          description: Offset distance; not a record count because Kafka offsets may contain gaps.
         targetAdjusted:
           type: boolean
     ConsumerGroupOffsetsResetPreview:
@@ -7225,6 +7226,6 @@ components:
           items:
             $ref: '#/components/schemas/Action'
 servers:
-  - url: http://localhost:8080
-    description: Default endpoint for MyKafka UI API
+  - url: /
+    description: Current endpoint for MyKafka UI API
     variables: {}

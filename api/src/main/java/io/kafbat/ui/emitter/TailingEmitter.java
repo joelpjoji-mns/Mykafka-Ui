@@ -33,8 +33,8 @@ public class TailingEmitter extends AbstractEmitter {
                         PollingSettings pollingSettings,
                         int recentMessagesLimit) {
     super(
-      MessagesProcessing.create(deserializer, filter, false, recentMessagesLimit),
-      pollingSettings);
+        MessagesProcessing.create(deserializer, filter, false, recentMessagesLimit),
+        pollingSettings);
     this.consumerSupplier = consumerSupplier;
     this.consumerPosition = consumerPosition;
     this.recentMessagesLimit = recentMessagesLimit;
@@ -80,8 +80,8 @@ public class TailingEmitter extends AbstractEmitter {
     Map<TopicPartition, Long> snapshotStartOffsets = snapshotStartOffsets(seekOperations);
     Set<TopicPartition> fullyRead = new HashSet<>();
     Set<TopicPartition> paused = new HashSet<>();
-    List<ConsumerRecord<Bytes, Bytes>> historicalRecords = new ArrayList<>();
-    List<ConsumerRecord<Bytes, Bytes>> bufferedLiveRecords = new ArrayList<>();
+    final List<ConsumerRecord<Bytes, Bytes>> historicalRecords = new ArrayList<>();
+    final List<ConsumerRecord<Bytes, Bytes>> bufferedLiveRecords = new ArrayList<>();
 
     consumer.assign(checkpointOffsets.keySet());
     snapshotStartOffsets.forEach(consumer::seek);

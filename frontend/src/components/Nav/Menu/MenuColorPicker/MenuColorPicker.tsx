@@ -28,10 +28,7 @@ const MenuColorPicker = ({ setColorKey }: MenuColorPickerProps) => {
   };
 
   return (
-    <Dropdown
-      aria-label="Color Picker Dropdown"
-      label={<ColorPickerIcon />}
-    >
+    <Dropdown aria-label="Color Picker Dropdown" label={<ColorPickerIcon />}>
       <S.Container>
         {COLOR_KEYS.map((key) => (
           <S.ColorCircle

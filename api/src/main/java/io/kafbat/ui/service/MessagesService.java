@@ -80,8 +80,8 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
-import org.openapitools.jackson.nullable.JsonNullable;
 import org.apache.kafka.common.utils.Bytes;
+import org.openapitools.jackson.nullable.JsonNullable;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -1273,7 +1273,7 @@ public class MessagesService {
         return List.of();
       }
 
-      ConsumerRecordDeserializer deserializer = deserializationService.deserializerFor(
+      final ConsumerRecordDeserializer deserializer = deserializationService.deserializerFor(
           cluster,
           topic,
           keySerde,

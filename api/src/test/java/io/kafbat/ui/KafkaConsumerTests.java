@@ -31,10 +31,10 @@ class KafkaConsumerTests extends AbstractIntegrationTest {
 
   @Autowired
   private WebTestClient webTestClient;
-    @Autowired
-    private ClustersStorage clustersStorage;
-    @Autowired
-    private StatisticsService statisticsService;
+  @Autowired
+  private ClustersStorage clustersStorage;
+  @Autowired
+  private StatisticsService statisticsService;
 
 
   @Test
@@ -233,7 +233,7 @@ class KafkaConsumerTests extends AbstractIntegrationTest {
 
   @Test
   void shouldReturnConfigsForBroker() {
-        statisticsService.updateCache(clustersStorage.getClusterByName(LOCAL).orElseThrow()).block();
+    statisticsService.updateCache(clustersStorage.getClusterByName(LOCAL).orElseThrow()).block();
 
     List<BrokerConfigDTO> configs = webTestClient.get()
         .uri("/api/clusters/{clusterName}/brokers/{id}/configs",

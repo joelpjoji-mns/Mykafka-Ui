@@ -57,8 +57,10 @@ class OffsetsResetServiceActiveGroupTest {
   void waitsForAnActiveGroupToBecomeInactiveBeforeResettingOffsets() {
     ActiveWaitFixture fixture = activeWaitFixture();
     when(fixture.adminClient().listOffsets(
-      Mockito.anyCollection(), Mockito.any(OffsetSpec.class), Mockito.eq(true)))
-      .thenReturn(Mono.just(Map.of(fixture.partition(), 0L)), Mono.just(Map.of(fixture.partition(), 10L)));
+        Mockito.anyCollection(), Mockito.any(OffsetSpec.class), Mockito.eq(true)))
+        .thenReturn(
+            Mono.just(Map.of(fixture.partition(), 0L)),
+            Mono.just(Map.of(fixture.partition(), 10L)));
     when(fixture.adminClient().alterConsumerGroupOffsets(fixture.groupId(), Map.of(fixture.partition(), 5L)))
         .thenReturn(Mono.empty());
 
@@ -69,55 +71,57 @@ class OffsetsResetServiceActiveGroupTest {
         .verifyComplete();
 
     verify(fixture.adminClient()).alterConsumerGroupOffsets(
-      fixture.groupId(), Map.of(fixture.partition(), 5L));
-    }
+        fixture.groupId(), Map.of(fixture.partition(), 5L));
+  }
 
-    @Test
-    void waitsForAnActiveGroupBeforeResettingToEarliest() {
+  @Test
+  void waitsForAnActiveGroupBeforeResettingToEarliest() {
     ActiveWaitFixture fixture = activeWaitFixture();
     when(fixture.adminClient().listOffsets(
-      Mockito.anyCollection(), Mockito.any(OffsetSpec.class), Mockito.eq(true)))
-      .thenReturn(Mono.just(Map.of(fixture.partition(), 0L)));
+        Mockito.anyCollection(), Mockito.any(OffsetSpec.class), Mockito.eq(true)))
+        .thenReturn(Mono.just(Map.of(fixture.partition(), 0L)));
     when(fixture.adminClient().alterConsumerGroupOffsets(fixture.groupId(), Map.of(fixture.partition(), 0L)))
-      .thenReturn(Mono.empty());
+        .thenReturn(Mono.empty());
 
     verifyWaitsAndResets(
-      fixture,
-      fixture.service().resetToEarliest(
-        fixture.cluster(), fixture.groupId(), fixture.partition().topic(), List.of(0), true),
-      0L);
-    }
+        fixture,
+        fixture.service().resetToEarliest(
+            fixture.cluster(), fixture.groupId(), fixture.partition().topic(), List.of(0), true),
+        0L);
+  }
 
-    @Test
-    void waitsForAnActiveGroupBeforeResettingToLatest() {
+  @Test
+  void waitsForAnActiveGroupBeforeResettingToLatest() {
     ActiveWaitFixture fixture = activeWaitFixture();
     when(fixture.adminClient().listOffsets(
-      Mockito.anyCollection(), Mockito.any(OffsetSpec.class), Mockito.eq(true)))
-      .thenReturn(Mono.just(Map.of(fixture.partition(), 10L)));
+        Mockito.anyCollection(), Mockito.any(OffsetSpec.class), Mockito.eq(true)))
+        .thenReturn(Mono.just(Map.of(fixture.partition(), 10L)));
     when(fixture.adminClient().alterConsumerGroupOffsets(fixture.groupId(), Map.of(fixture.partition(), 10L)))
-      .thenReturn(Mono.empty());
+        .thenReturn(Mono.empty());
 
     verifyWaitsAndResets(
-      fixture,
-      fixture.service().resetToLatest(
-        fixture.cluster(), fixture.groupId(), fixture.partition().topic(), List.of(0), true),
-      10L);
-    }
+        fixture,
+        fixture.service().resetToLatest(
+            fixture.cluster(), fixture.groupId(), fixture.partition().topic(), List.of(0), true),
+        10L);
+  }
 
-    @Test
-    void waitsForAnActiveGroupBeforeResettingToTimestamp() {
+  @Test
+  void waitsForAnActiveGroupBeforeResettingToTimestamp() {
     ActiveWaitFixture fixture = activeWaitFixture();
     when(fixture.adminClient().listOffsets(
-      Mockito.anyCollection(), Mockito.any(OffsetSpec.class), Mockito.eq(true)))
-      .thenReturn(Mono.just(Map.of(fixture.partition(), 4L)), Mono.just(Map.of(fixture.partition(), 10L)));
+        Mockito.anyCollection(), Mockito.any(OffsetSpec.class), Mockito.eq(true)))
+        .thenReturn(
+            Mono.just(Map.of(fixture.partition(), 4L)),
+            Mono.just(Map.of(fixture.partition(), 10L)));
     when(fixture.adminClient().alterConsumerGroupOffsets(fixture.groupId(), Map.of(fixture.partition(), 4L)))
-      .thenReturn(Mono.empty());
+        .thenReturn(Mono.empty());
 
     verifyWaitsAndResets(
-      fixture,
-      fixture.service().resetToTimestamp(
-        fixture.cluster(), fixture.groupId(), fixture.partition().topic(), List.of(0), 1_000L, true),
-      4L);
+        fixture,
+        fixture.service().resetToTimestamp(
+            fixture.cluster(), fixture.groupId(), fixture.partition().topic(), List.of(0), 1_000L, true),
+        4L);
   }
 
   @Test
@@ -155,11 +159,11 @@ class OffsetsResetServiceActiveGroupTest {
 
   private ActiveWaitFixture activeWaitFixture() {
     String groupId = "orders-consumer";
-    TopicPartition partition = new TopicPartition("orders", 0);
+    final TopicPartition partition = new TopicPartition("orders", 0);
     KafkaCluster cluster = KafkaCluster.builder().name("test").build();
     AdminClientService adminClientService = Mockito.mock(AdminClientService.class);
     ReactiveAdminClient adminClient = Mockito.mock(ReactiveAdminClient.class);
-    OffsetsResetService service = new OffsetsResetService(adminClientService);
+    final OffsetsResetService service = new OffsetsResetService(adminClientService);
 
     when(adminClientService.get(cluster)).thenReturn(Mono.just(adminClient));
     when(adminClient.listConsumerGroupNames()).thenReturn(Mono.just(List.of(groupId)));

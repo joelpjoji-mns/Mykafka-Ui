@@ -25,9 +25,11 @@ export const Wrapper = styled.div<Pick<InputProps, 'inputSize'>>(
     }
     svg {
       position: absolute;
-      top: ${inputSize && INPUT_SIZES[inputSize]
-        ? `${INPUT_SIZES[inputSize] / 2 - 2.5}px`
-        : `17.5px`};
+      top: ${
+        inputSize && INPUT_SIZES[inputSize]
+          ? `${INPUT_SIZES[inputSize] / 2 - 2.5}px`
+          : `17.5px`
+      };
       right: 13px;
       z-index: 1;
     }
@@ -40,9 +42,11 @@ export const Input = styled.input<InputProps>(
     border: 1px ${input.borderColor.normal} solid;
     border-radius: 4px;
     color: ${input.color.normal};
-    height: ${inputSize && `${INPUT_SIZES[inputSize]}px`
-      ? `${INPUT_SIZES[inputSize]}px`
-      : '40px'};
+    height: ${
+      inputSize && `${INPUT_SIZES[inputSize]}px`
+        ? `${INPUT_SIZES[inputSize]}px`
+        : '40px'
+    };
     width: 100%;
     padding-left: 12px;
     padding-right: 30px;

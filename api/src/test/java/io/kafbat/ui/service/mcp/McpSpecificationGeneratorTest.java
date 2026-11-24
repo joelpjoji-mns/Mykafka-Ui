@@ -19,20 +19,22 @@ import io.kafbat.ui.model.TopicColumnsToSortDTO;
 import io.kafbat.ui.model.TopicUpdateDTO;
 import io.kafbat.ui.service.ClustersStorage;
 import io.kafbat.ui.service.KafkaConnectService;
+import io.kafbat.ui.service.TopicDeveloperInsightsService;
 import io.kafbat.ui.service.TopicsService;
 import io.kafbat.ui.service.acl.AclsService;
 import io.kafbat.ui.service.analyze.TopicAnalysisService;
 import io.kafbat.ui.service.profile.TopicDataProfileService;
-import io.kafbat.ui.service.TopicDeveloperInsightsService;
 import io.modelcontextprotocol.server.McpAsyncServerExchange;
 import io.modelcontextprotocol.server.McpServerFeatures.AsyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.swagger.v3.oas.annotations.Operation;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -294,6 +296,16 @@ class McpSpecificationGeneratorTest {
         .verifyComplete();
   }
 
+  @Test
+  void emptyMonoResponseBodyStillProducesResult() {
+    McpSpecificationGenerator generator = generatorWith(mock(ClustersStorage.class));
+    AsyncToolSpecification tool = findTool(generator.convertTool(new EmptyMonoBodyTool()), "emptyMonoBody");
+
+    StepVerifier.create(invokeTool(tool, Map.of()))
+        .assertNext(result -> assertThat(result.isError()).isFalse())
+        .verifyComplete();
+  }
+
   // --- helpers ---
 
   private static ClustersStorage readOnlyClusterStorage() {
@@ -316,5 +328,17 @@ class McpSpecificationGeneratorTest {
     return spec.call()
         .apply(mock(McpAsyncServerExchange.class), new HashMap<>(args))
         .contextWrite(Context.of(ServerWebExchange.class, mock(ServerWebExchange.class)));
+  }
+
+  interface EmptyMonoBodyApi {
+    @Operation(operationId = "emptyMonoBody")
+    Mono<ResponseEntity<Mono<Void>>> emptyMonoBody();
+  }
+
+  static class EmptyMonoBodyTool implements EmptyMonoBodyApi, McpTool {
+    @Override
+    public Mono<ResponseEntity<Mono<Void>>> emptyMonoBody() {
+      return Mono.just(ResponseEntity.ok(Mono.empty()));
+    }
   }
 }

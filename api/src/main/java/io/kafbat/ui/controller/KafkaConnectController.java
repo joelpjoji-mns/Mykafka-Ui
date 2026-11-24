@@ -343,10 +343,20 @@ public class KafkaConnectController extends AbstractController implements KafkaC
           String pluginName,
           @Valid Mono<Map<String, Object>> requestBody,
           ServerWebExchange exchange) {
-    return kafkaConnectService
-        .validateConnectorPluginConfig(
-            getCluster(clusterName), connectName, pluginName, requestBody)
-        .map(ResponseEntity::ok);
+    var context =
+        AccessContext.builder()
+            .cluster(clusterName)
+            .connectActions(connectName, ConnectAction.VIEW)
+            .operationName("validateConnectorPluginConfig")
+            .build();
+
+    return validateAccess(context)
+        .then(Mono.defer(() ->
+            kafkaConnectService
+                .validateConnectorPluginConfig(
+                    getCluster(clusterName), connectName, pluginName, requestBody)
+                .map(ResponseEntity::ok)))
+        .doOnEach(sig -> audit(context, sig));
   }
 
   private Comparator<FullConnectorInfoDTO> getConnectorsComparator(

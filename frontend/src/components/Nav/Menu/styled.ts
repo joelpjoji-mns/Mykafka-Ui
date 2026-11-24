@@ -25,12 +25,16 @@ export const MenuItem = styled('li').attrs({ role: 'menuitem' })<{
     cursor: pointer;
     text-decoration: none;
     border-radius: 8px;
-    background-color: ${$isActive
-      ? theme.menu[$variant].backgroundColor.active
-      : theme.menu[$variant].backgroundColor.normal};
-    color: ${$isActive
-      ? theme.menu[$variant].color.active
-      : theme.menu[$variant].color.normal};
+    background-color: ${
+      $isActive
+        ? theme.menu[$variant].backgroundColor.active
+        : theme.menu[$variant].backgroundColor.normal
+    };
+    color: ${
+      $isActive
+        ? theme.menu[$variant].color.active
+        : theme.menu[$variant].color.normal
+    };
 
     &:hover {
       background-color: ${theme.menu[$variant].backgroundColor.hover};

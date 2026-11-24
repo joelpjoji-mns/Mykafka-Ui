@@ -4,9 +4,11 @@ import styled, { css } from 'styled-components';
 
 const StyledFilterIcon = styled.div<{ $active: boolean }>`
   ${({ $active, theme: { table } }) => css`
-    color: ${$active
-      ? table.filter.multiSelect.filterIcon.fill.active
-      : table.filter.multiSelect.filterIcon.fill.normal};
+    color: ${
+      $active
+        ? table.filter.multiSelect.filterIcon.fill.active
+        : table.filter.multiSelect.filterIcon.fill.normal
+    };
 
     &:hover {
       color: ${table.filter.multiSelect.filterIcon.fill.hover};

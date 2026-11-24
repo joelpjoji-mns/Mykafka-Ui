@@ -183,9 +183,11 @@ export const Access = styled.span`
 
 export const Outcome = styled.span<{ $failed: boolean }>(
   ({ theme, $failed }) => css`
-    color: ${$failed
-      ? theme.metrics.indicator.warningTextColor
-      : theme.circularAlert.color.success};
+    color: ${
+      $failed
+        ? theme.metrics.indicator.warningTextColor
+        : theme.circularAlert.color.success
+    };
     font-size: 12px;
     font-weight: 600;
   `
